@@ -18,16 +18,30 @@ double _dec(dynamic v) {
 
 String _dioErrorMessage(Object e) {
   if (e is DioException) {
+    final uri = e.requestOptions.uri.toString();
+    final method = e.requestOptions.method;
+    final code = e.response?.statusCode;
     final data = e.response?.data;
     if (data is Map && data['error'] is String) {
-      return data['error'] as String;
+      final base = data['error'] as String;
+      if (code == 404) {
+        return '$base ($method $uri returned 404). Backend may be outdated or API base URL is wrong.';
+      }
+      return base;
     }
     if (data is String && data.trim().isNotEmpty) {
-      return data.trim();
+      final base = data.trim();
+      if (code == 404) {
+        return '$base ($method $uri returned 404). Backend may be outdated or API base URL is wrong.';
+      }
+      return base;
     }
-    final code = e.response?.statusCode;
+    if (code == 404) {
+      return 'Endpoint not found: $method $uri (404). '
+          'Make sure cashier service is updated and API base URL points to the backend root (example: http://localhost:8000).';
+    }
     if (code != null) {
-      return 'Request failed ($code)';
+      return 'Request failed ($code): $method $uri';
     }
   }
   return e.toString();
@@ -119,22 +133,22 @@ class RestaurantStore extends ChangeNotifier {
     try {
       await _loadMenu();
     } catch (e) {
-      errs.add('Menu: $e');
+      errs.add('Menu: ${_dioErrorMessage(e)}');
     }
     try {
       await _loadSections();
     } catch (e) {
-      errs.add('Sections: $e');
+      errs.add('Sections: ${_dioErrorMessage(e)}');
     }
     try {
       await _loadTablesAndActiveOrders();
     } catch (e) {
-      errs.add('Tables: $e');
+      errs.add('Tables: ${_dioErrorMessage(e)}');
     }
     try {
       await _loadCompletedTransactions();
     } catch (e) {
-      errs.add('History: $e');
+      errs.add('History: ${_dioErrorMessage(e)}');
     }
     if (errs.isNotEmpty) {
       lastError = errs.join('\n');
@@ -147,7 +161,7 @@ class RestaurantStore extends ChangeNotifier {
     try {
       await _loadMenu();
     } catch (e) {
-      lastError = '${lastError ?? ''}\nMenu refresh: $e'.trim();
+      lastError = '${lastError ?? ''}\nMenu refresh: ${_dioErrorMessage(e)}'.trim();
     }
     notifyListeners();
   }
