@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -3275,15 +3277,23 @@ class BillReceiptDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final screenH = MediaQuery.sizeOf(context).height;
+    final maxDialogH = math.min(
+      math.min(screenH * 0.88, 720.0),
+      math.max(260.0, screenH - 48),
+    );
+
     return Dialog(
       backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: GlassContainer(
-        padding: const EdgeInsets.all(32),
+        padding: const EdgeInsets.all(24),
         borderRadius: 24,
         child: SizedBox(
           width: 380,
+          height: maxDialogH,
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Container(
                 padding: const EdgeInsets.all(12),
@@ -3293,9 +3303,10 @@ class BillReceiptDialog extends StatelessWidget {
                 ),
                 child: const Icon(Icons.restaurant, color: PosColors.primary, size: 32),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Text(
                 'HYPER POS',
+                textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
@@ -3305,6 +3316,7 @@ class BillReceiptDialog extends StatelessWidget {
               ),
               Text(
                 title,
+                textAlign: TextAlign.center,
                 style: GoogleFonts.inter(
                   color: PosColors.textMuted,
                   fontSize: 12,
@@ -3313,66 +3325,88 @@ class BillReceiptDialog extends StatelessWidget {
                 ),
               ),
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
+                padding: EdgeInsets.symmetric(vertical: 16),
                 child: Divider(color: PosColors.border, thickness: 1),
               ),
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Table: $tableName', 
-                    style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: PosColors.textMain)),
+                  Expanded(
+                    child: Text(
+                      'Table: $tableName',
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.bold,
+                        color: PosColors.textMain,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
                   Text(
                     '${timestamp.day}/${timestamp.month} ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
                     style: GoogleFonts.inter(color: PosColors.textMuted, fontSize: 12),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 200),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: lines.length,
-                  itemBuilder: (context, index) {
-                    final line = lines[index];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '${line.quantity}× ${line.itemName}',
-                              style: GoogleFonts.inter(
-                                color: PosColors.textMain,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w500,
+              const SizedBox(height: 12),
+              Expanded(
+                child: lines.isEmpty
+                    ? Center(
+                        child: Text(
+                          'No lines',
+                          style: GoogleFonts.inter(color: PosColors.textMuted),
+                        ),
+                      )
+                    : ListView.separated(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        itemCount: lines.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final line = lines[index];
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  '${line.quantity}× ${line.itemName}',
+                                  style: GoogleFonts.inter(
+                                    color: PosColors.textMain,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  softWrap: true,
+                                ),
                               ),
-                            ),
-                          ),
-                          Text(
-                            line.lineTotalFormatted,
-                            style: GoogleFonts.inter(
-                              color: PosColors.textMain,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
+                              const SizedBox(width: 10),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 120),
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    line.lineTotalFormatted,
+                                    style: GoogleFonts.inter(
+                                      color: PosColors.textMain,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
-                    );
-                  },
-                ),
               ),
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
+                padding: EdgeInsets.symmetric(vertical: 16),
                 child: Divider(color: PosColors.border, thickness: 1, height: 1),
               ),
               _buildBillRow('Subtotal', totals.subtotalFormatted),
               const SizedBox(height: 8),
               _buildBillRow('Tax (10%)', totals.taxFormatted),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               _buildBillRow('Total Amount', totals.totalFormatted, isBold: true),
-              const SizedBox(height: 32),
+              const SizedBox(height: 20),
               Row(
                 children: [
                   Expanded(
