@@ -1457,35 +1457,21 @@ class _ChannelQueuePanel extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.all(DS.s10),
                           decoration: BoxDecoration(
-                            color: DS.surface,
+                            color: st.bg,
                             borderRadius: BorderRadius.circular(DS.r6),
                             border: Border.all(
-                              color: sel ? DS.accent : DS.border,
-                              width: sel ? 1.4 : 1,
+                              color: sel ? DS.accent : st.border,
+                              width: sel ? 1.5 : 1,
                             ),
                           ),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Container(
-                                width: 4,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: st.border,
-                                  borderRadius: BorderRadius.circular(2),
-                                ),
-                              ),
-                              const SizedBox(width: DS.s10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('#${row.shortId}', style: DS.bodyStrong()),
-                                    Text(
-                                      '₹${row.total.toStringAsFixed(2)} · ${row.status}',
-                                      style: DS.caption(),
-                                    ),
-                                  ],
-                                ),
+                              Text('#${row.shortId}', style: DS.bodyStrong()),
+                              Text(
+                                '₹${row.total.toStringAsFixed(2)} · ${row.status}',
+                                style: DS.caption(color: st.ink),
                               ),
                             ],
                           ),
@@ -1591,8 +1577,7 @@ class _FloorSectionBlock extends StatelessWidget {
   }
 }
 
-/// Compact, information-dense table tile. The status color is the **left
-/// edge bar**; the body stays neutral so prices and labels stay legible.
+/// Compact table tile: **full-card fill** uses status tint (matches legend).
 class _SectionTableTile extends StatelessWidget {
   const _SectionTableTile({
     required this.table,
@@ -1645,90 +1630,71 @@ class _SectionTableTile extends StatelessWidget {
         child: Container(
           width: _cardWidth,
           height: _cardHeight,
+          padding: const EdgeInsets.symmetric(
+            horizontal: DS.s10,
+            vertical: DS.s8,
+          ),
           decoration: BoxDecoration(
-            color: DS.surface,
+            color: st.bg,
             borderRadius: BorderRadius.circular(DS.r6),
             border: Border.all(
-              color: selected ? DS.accent : DS.border,
-              width: selected ? 1.4 : 1,
+              color: selected ? DS.accent : st.border,
+              width: selected ? 1.5 : 1,
             ),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Status edge — only colored part of the tile.
-              Container(
-                width: 4,
-                decoration: BoxDecoration(
-                  color: st.border,
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(DS.r6),
-                    bottomLeft: Radius.circular(DS.r6),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      table.name,
+                      style: DS.bodyStrong(color: DS.text),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
+                  Text(
+                    _floorToneLabel(tone),
+                    style: DS.caption(color: st.ink),
+                  ),
+                ],
               ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: DS.s10,
-                    vertical: DS.s8,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: amount != null && amount > 0
+                          ? MoneyText(amount, size: 13, color: DS.text)
+                          : Text(
+                              '—',
+                              style: DS.number(color: DS.textSubtle),
+                            ),
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              table.name,
-                              style: DS.bodyStrong(),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          Text(
-                            _floorToneLabel(tone),
-                            style: DS.caption(color: st.ink),
-                          ),
-                        ],
+                  if (dur.isNotEmpty) ...[
+                    const SizedBox(width: DS.s6),
+                    Text(
+                      dur,
+                      style: DS.number(
+                        size: 11,
+                        color: DS.textMuted,
                       ),
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Flexible(
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: amount != null && amount > 0
-                                  ? MoneyText(amount, size: 13)
-                                  : Text(
-                                      '—',
-                                      style: DS.number(color: DS.textSubtle),
-                                    ),
-                            ),
-                          ),
-                          if (dur.isNotEmpty) ...[
-                            const SizedBox(width: DS.s6),
-                            Text(
-                              dur,
-                              style: DS.number(
-                                size: 11,
-                                color: DS.textMuted,
-                              ),
-                            ),
-                          ],
-                          if (occupied) ...[
-                            const SizedBox(width: DS.s6),
-                            IconAction(
-                              icon: Icons.print_outlined,
-                              tooltip: 'Bill / receipt',
-                              onTap: onBillPreview,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
+                    ),
+                  ],
+                  if (occupied) ...[
+                    const SizedBox(width: DS.s6),
+                    IconAction(
+                      icon: Icons.print_outlined,
+                      tooltip: 'Bill / receipt',
+                      onTap: onBillPreview,
+                    ),
+                  ],
+                ],
               ),
             ],
           ),
