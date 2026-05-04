@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  dio: ^5.9.0
   google_fonts: ^8.0.2
   printing: ^5.14.3
   pdf: ^3.12.0

@@ -1,11 +1,17 @@
-import 'dart:collection';
-import 'dart:ui';
-
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+import 'pos_models.dart';
+import 'pos_restaurant_store.dart';
+
+const apiBaseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://localhost:8000',
+);
 
 void main() {
   runApp(const CashierDashApp());
@@ -33,20 +39,22 @@ class CashierDashApp extends StatefulWidget {
 }
 
 class _CashierDashAppState extends State<CashierDashApp> {
-  final RestaurantStore _store = RestaurantStore.seeded();
-  bool _isLoggedIn = false;
+  RestaurantStore? _store;
   String _cashierName = '';
 
-  void _handleLogin(String cashierName) {
+  void _handleLogin(String token, String cashierName) {
     setState(() {
-      _isLoggedIn = true;
+      _store = RestaurantStore.connect(
+        baseUrl: apiBaseUrl,
+        token: token,
+      );
       _cashierName = cashierName;
     });
   }
 
   void _handleLogout() {
     setState(() {
-      _isLoggedIn = false;
+      _store = null;
       _cashierName = '';
     });
   }
@@ -56,7 +64,7 @@ class _CashierDashAppState extends State<CashierDashApp> {
     final textTheme = GoogleFonts.outfitTextTheme(ThemeData.light().textTheme);
 
     return MaterialApp(
-      title: 'HyperPOS',
+      title: 'Bawarchi Cashier',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.light().copyWith(
         scaffoldBackgroundColor: PosColors.background,
@@ -112,10 +120,10 @@ class _CashierDashAppState extends State<CashierDashApp> {
           elevation: 0,
         ),
       ),
-      home: _isLoggedIn
+      home: _store != null
           ? DashboardScreen(
               cashierName: _cashierName,
-              store: _store,
+              store: _store!,
               onLogout: _handleLogout,
             )
           : LoginScreen(onLogin: _handleLogin),
@@ -161,7 +169,7 @@ class GlassContainer extends StatelessWidget {
 class LoginScreen extends StatefulWidget {
   const LoginScreen({required this.onLogin, super.key});
 
-  final ValueChanged<String> onLogin;
+  final void Function(String token, String cashierName) onLogin;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -170,9 +178,11 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _pinController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
   late AnimationController _animController;
+  bool _busy = false;
+  String? _loginError;
 
   @override
   void initState() {
@@ -186,16 +196,53 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void dispose() {
     _animController.dispose();
-    _nameController.dispose();
-    _pinController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) {
       return;
     }
-    widget.onLogin(_nameController.text.trim());
+    setState(() {
+      _busy = true;
+      _loginError = null;
+    });
+    try {
+      final dio = Dio(
+        BaseOptions(
+          baseUrl: apiBaseUrl.replaceAll(RegExp(r'/$'), ''),
+          headers: {'Content-Type': 'application/json'},
+        ),
+      );
+      final res = await dio.post<Map<String, dynamic>>(
+        '/api/cashier/login',
+        data: {
+          'phone': _phoneController.text.trim(),
+          'password': _passwordController.text.trim(),
+        },
+      );
+      final token = res.data?['token'] as String?;
+      final user = res.data?['user'] as Map<String, dynamic>?;
+      final name = user?['name'] as String? ?? 'Cashier';
+      if (token == null || token.isEmpty) {
+        throw Exception('No token in response');
+      }
+      if (!mounted) {
+        return;
+      }
+      widget.onLogin(token, name);
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _loginError = 'Sign-in failed. Check phone and password.');
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
   }
 
   @override
@@ -229,7 +276,7 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        'HyperPOS',
+                        'Bawarchi',
                         style: GoogleFonts.outfit(
                           fontSize: 32,
                           fontWeight: FontWeight.bold,
@@ -239,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Enter your credentials to access the floor.',
+                        'Sign in with your cashier phone and password.',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.outfit(
                           color: PosColors.textMuted,
@@ -248,37 +295,50 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                       const SizedBox(height: 40),
                       TextFormField(
-                        controller: _nameController,
+                        controller: _phoneController,
                         style: const TextStyle(color: PosColors.textMain),
                         decoration: const InputDecoration(
-                          labelText: 'Cashier Name',
-                          prefixIcon: Icon(Icons.person_outline,
+                          labelText: 'Phone',
+                          prefixIcon: Icon(Icons.phone_outlined,
                               color: PosColors.textMuted),
                         ),
                         validator: (value) =>
-                            value!.isEmpty ? 'Enter cashier name' : null,
+                            value == null || value.trim().isEmpty
+                                ? 'Enter phone number'
+                                : null,
                       ),
                       const SizedBox(height: 16),
                       TextFormField(
-                        controller: _pinController,
+                        controller: _passwordController,
                         obscureText: true,
-                        keyboardType: TextInputType.number,
                         style: const TextStyle(color: PosColors.textMain),
                         decoration: const InputDecoration(
-                          labelText: 'PIN Code',
+                          labelText: 'Password',
                           prefixIcon: Icon(Icons.lock_outline,
                               color: PosColors.textMuted),
                         ),
-                        validator: (value) => value != null && value.length < 4
-                            ? 'PIN min 4 digits'
-                            : null,
+                        validator: (value) =>
+                            value == null || value.isEmpty
+                                ? 'Enter password'
+                                : null,
                       ),
+                      if (_loginError != null) ...[
+                        const SizedBox(height: 16),
+                        Text(
+                          _loginError!,
+                          style: GoogleFonts.outfit(
+                            color: PosColors.error,
+                            fontSize: 13,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
                       const SizedBox(height: 40),
                       SizedBox(
                         width: double.infinity,
                         height: 52,
                         child: ElevatedButton(
-                          onPressed: _submit,
+                          onPressed: _busy ? null : _submit,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: PosColors.primary,
                             shape: RoundedRectangleBorder(
@@ -287,7 +347,7 @@ class _LoginScreenState extends State<LoginScreen>
                             elevation: 0,
                           ),
                           child: Text(
-                            'Access Terminal',
+                            _busy ? 'Signing in…' : 'Access Terminal',
                             style: GoogleFonts.outfit(
                               fontSize: 18,
                               fontWeight: FontWeight.w600,
@@ -357,41 +417,185 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   PosSection _section = PosSection.floor;
   String? _selectedTableId;
-  bool _createTableMode = false;
 
   DiningTable? get _selectedTable {
     if (_selectedTableId == null) return null;
     return widget.store.tableById(_selectedTableId!);
   }
 
-  Future<void> _openCreateTableDialogAt(int x, int y) async {
-    final draft = await showDialog<TableDraft>(
+  Future<void> _openCreateSectionDialog() async {
+    final ctrl = TextEditingController();
+    final name = await showDialog<String>(
       context: context,
-      builder: (_) => CreateTableDialog(
-        defaultName: 'T-${x + 1}${y + 1}',
-        defaultCapacity: 4,
+      builder: (ctx) => AlertDialog(
+        title: Text('New section', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          decoration: const InputDecoration(
+            labelText: 'Section name',
+            hintText: 'e.g. Family, बगीचा',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Create'),
+          ),
+        ],
       ),
     );
 
-    if (!mounted || draft == null) return;
+    if (!mounted || name == null || name.isEmpty) return;
 
-    final table = widget.store.addTable(
-      name: draft.name,
-      capacity: draft.capacity,
-      gridX: x,
-      gridY: y,
+    await widget.store.createSection(name);
+    if (mounted) setState(() {});
+    if (mounted && widget.store.lastError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(widget.store.lastError!)),
+      );
+    }
+  }
+
+  Future<void> _openCreateTableInSectionDialog(String sectionId) async {
+    final numCtrl = TextEditingController(
+      text: '${widget.store.suggestNextTableNumber(sectionId)}',
+    );
+    final labelCtrl = TextEditingController();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Add table', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: numCtrl,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Table number (within section)',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: labelCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Display label (optional)',
+                hintText: 'e.g. B1, G3',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
     );
 
-    if (table == null) {
+    if (!mounted || ok != true) return;
+
+    final n = int.tryParse(numCtrl.text.trim());
+    if (n == null || n <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('A table already exists in that cell.')),
+        const SnackBar(content: Text('Enter a valid table number')),
       );
       return;
     }
 
-    setState(() {
-      _selectedTableId = table.id;
-    });
+    final label = labelCtrl.text.trim();
+    final table = await widget.store.addTableInSection(
+      sectionId: sectionId,
+      tableNumber: n,
+      label: label.isEmpty ? null : label,
+    );
+
+    if (!mounted) return;
+
+    if (table != null) {
+      setState(() => _selectedTableId = table.id);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.store.lastError ?? 'Could not create table',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _confirmDeleteSection(FloorSection section) async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Delete section?', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Remove "${section.name}"? Tables must be removed from this section first.',
+          style: GoogleFonts.outfit(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: PosColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || go != true) return;
+
+    final success = await widget.store.deleteSection(section.id);
+    if (!mounted) return;
+
+    if (!success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.store.lastError ?? 'Could not delete section',
+          ),
+        ),
+      );
+    } else {
+      setState(() {});
+    }
+  }
+
+  void _showBillPreview(DiningTable table) {
+    final lines = widget.store.orderDetailsForTable(table.id);
+    if (lines.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No order lines yet')),
+      );
+      return;
+    }
+    final totals = widget.store.calculateBill(table.id);
+    showDialog<void>(
+      context: context,
+      builder: (_) => BillReceiptDialog(
+        title: 'Preview',
+        tableName: table.name,
+        timestamp: DateTime.now(),
+        lines: lines,
+        totals: totals,
+      ),
+    );
   }
 
   Future<void> _openAddMenuDialog() async {
@@ -402,11 +606,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (!mounted || draft == null) return;
 
-    widget.store.addMenuItem(
+    final ok = await widget.store.addMenuItem(
       name: draft.name,
       category: draft.category,
       price: draft.price,
     );
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            widget.store.lastError ?? 'Could not add menu item',
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _openAddOrderDialogForSelected() async {
@@ -416,7 +630,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (widget.store.menuItems.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add menu items first.')),
+        const SnackBar(
+          content: Text('No menu items yet. Add them from the Menu tab.'),
+        ),
       );
       return;
     }
@@ -428,18 +644,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     if (!mounted || draft == null) return;
 
-    widget.store.addItemToOrder(
+    await widget.store.addItemToOrder(
       tableId: table.id,
       menuItemId: draft.menuItemId,
       quantity: draft.quantity,
     );
+    if (mounted) setState(() {});
   }
 
   Future<void> _removeSelectedTable() async {
     final table = _selectedTable;
     if (table == null) return;
 
-    final success = widget.store.removeTable(table.id);
+    final success = await widget.store.removeTable(table.id);
     if (success) {
       setState(() {
         _selectedTableId = null;
@@ -457,7 +674,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _removeMenuItem(MenuItem item) async {
-    final success = widget.store.removeMenuItem(item.id);
+    if (!widget.store.canDeleteMenuItems) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only an administrator can remove menu items.'),
+        ),
+      );
+      return;
+    }
+    final success = await widget.store.removeMenuItem(item.id);
     if (success || !mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -471,58 +697,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final table = _selectedTable;
     if (table == null) return;
 
-    widget.store.addItemToOrder(
-      tableId: table.id,
-      menuItemId: item.id,
-      quantity: 1,
-    );
+    widget.store
+        .addItemToOrder(
+          tableId: table.id,
+          menuItemId: item.id,
+          quantity: 1,
+        )
+        .then((_) {
+          if (mounted) setState(() {});
+        });
   }
 
   Widget _buildSectionContent() {
     switch (_section) {
       case PosSection.floor:
-        return FloorSection(
+        return RestaurantFloorTab(
           store: widget.store,
           selectedTableId: _selectedTableId,
-          createTableMode: _createTableMode,
-          onToggleCreateMode: () {
-            setState(() {
-              _createTableMode = !_createTableMode;
-            });
-          },
-          onCellTap: (x, y) {
-            final table = widget.store.tableAtCell(x, y);
-            if (table != null) {
-              setState(() {
-                _selectedTableId = table.id;
-              });
-              return;
-            }
-            if (_createTableMode) {
-              _openCreateTableDialogAt(x, y);
-            } else {
-              setState(() {
-                _selectedTableId = null;
-              });
-            }
-          },
           onSelectTable: (table) {
             setState(() {
               _selectedTableId = table.id;
             });
           },
+          onAddSection: _openCreateSectionDialog,
+          onAddTableInSection: _openCreateTableInSectionDialog,
+          onDeleteSection: _confirmDeleteSection,
+          onBillPreview: _showBillPreview,
           onAddOrder: _openAddOrderDialogForSelected,
           onQuickAddItem: _quickAddToSelected,
           onSettle: () {
             final table = _selectedTable;
             if (table != null) {
-              widget.store.settleBill(table.id);
+              widget.store.settleBill(table.id).then((_) {
+                if (mounted) setState(() {});
+              });
             }
           },
           onMarkOccupied: () {
             final table = _selectedTable;
             if (table != null) {
-              widget.store.markTableOccupied(table.id);
+              widget.store.markTableOccupied(table.id).then((_) {
+                if (mounted) setState(() {});
+              });
             }
           },
           onDeleteTable: _removeSelectedTable,
@@ -530,13 +746,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
       case PosSection.menu:
         return MenuSection(
           store: widget.store,
+          canDeleteMenuItems: widget.store.canDeleteMenuItems,
           onAddMenuItem: _openAddMenuDialog,
           onDeleteMenuItem: _removeMenuItem,
         );
       case PosSection.billing:
         return BillingSection(
           store: widget.store,
-          onSettle: (table) => widget.store.settleBill(table.id),
+          onSettle: (table) {
+            widget.store.settleBill(table.id).then((_) {
+              if (mounted) setState(() {});
+            });
+          },
         );
       case PosSection.transactions:
         return TransactionsSection(
@@ -560,6 +781,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         setState(() {
                           _section = next;
                         });
+                        if (next == PosSection.menu) {
+                          widget.store.refreshMenu().then((_) {
+                            if (mounted) setState(() {});
+                          });
+                        }
                       },
                       onLogout: widget.onLogout,
                     ),
@@ -825,14 +1051,15 @@ class DashboardTopBar extends StatelessWidget {
   }
 }
 
-class FloorSection extends StatelessWidget {
-  const FloorSection({
+class RestaurantFloorTab extends StatelessWidget {
+  const RestaurantFloorTab({
     required this.store,
     required this.selectedTableId,
-    required this.createTableMode,
-    required this.onToggleCreateMode,
-    required this.onCellTap,
     required this.onSelectTable,
+    required this.onAddSection,
+    required this.onAddTableInSection,
+    required this.onDeleteSection,
+    required this.onBillPreview,
     required this.onAddOrder,
     required this.onQuickAddItem,
     required this.onSettle,
@@ -843,10 +1070,11 @@ class FloorSection extends StatelessWidget {
 
   final RestaurantStore store;
   final String? selectedTableId;
-  final bool createTableMode;
-  final VoidCallback onToggleCreateMode;
-  final void Function(int x, int y) onCellTap;
   final ValueChanged<DiningTable> onSelectTable;
+  final VoidCallback onAddSection;
+  final void Function(String sectionId) onAddTableInSection;
+  final void Function(FloorSection section) onDeleteSection;
+  final void Function(DiningTable table) onBillPreview;
   final VoidCallback onAddOrder;
   final ValueChanged<MenuItem> onQuickAddItem;
   final VoidCallback onSettle;
@@ -859,199 +1087,100 @@ class FloorSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: FloorCanvas(
-              store: store,
-              selectedTableId: selectedTableId,
-              createTableMode: createTableMode,
-              onToggleCreateMode: onToggleCreateMode,
-              onCellTap: onCellTap,
-              onSelectTable: onSelectTable,
-            ),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 340,
-            child: TableWorkbench(
-              store: store,
-              selectedTable: selectedTableId != null
-                  ? store.tableById(selectedTableId!)
-                  : null,
-              onAddOrder: onAddOrder,
-              onQuickAddItem: onQuickAddItem,
-              onSettle: onSettle,
-              onMarkOccupied: onMarkOccupied,
-              onDeleteTable: onDeleteTable,
-            ),
-          ),
-        ],
-      );
-  }
-}
-
-class FloorCanvas extends StatelessWidget {
-  const FloorCanvas({
-    required this.store,
-    required this.selectedTableId,
-    required this.createTableMode,
-    required this.onToggleCreateMode,
-    required this.onCellTap,
-    required this.onSelectTable,
-    super.key,
-  });
-
-  final RestaurantStore store;
-  final String? selectedTableId;
-  final bool createTableMode;
-  final VoidCallback onToggleCreateMode;
-  final void Function(int x, int y) onCellTap;
-  final ValueChanged<DiningTable> onSelectTable;
-
-  static const int rows = 12;
-  static const int columns = 16;
-
-  @override
-  Widget build(BuildContext context) {
-    final available = store.tables
-        .where((table) => table.status == TableStatus.available)
-        .length;
-    final occupied = store.tables
-        .where((table) => table.status == TableStatus.occupied)
-        .length;
-
-    return GlassContainer(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                const Icon(Icons.map_outlined, color: PosColors.primary, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  'Dining Area Map',
-                  style: GoogleFonts.outfit(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: PosColors.textMain,
-                  ),
-                ),
-                const SizedBox(width: 20),
-                _LegendDot(color: PosColors.accent, label: '$available Empty'),
-                const SizedBox(width: 12),
-                _LegendDot(color: PosColors.warning, label: '$occupied Busy'),
-                const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: onToggleCreateMode,
-                  icon: Icon(
-                      createTableMode ? Icons.close : Icons.edit_location_alt,
-                      size: 18,
-                      color: createTableMode
-                          ? PosColors.error
-                          : PosColors.textMain),
-                  label: Text(
-                    createTableMode ? 'Exit Build Mode' : 'Build Layout',
-                    style: TextStyle(
-                        fontSize: 13,
-                        color: createTableMode
-                            ? PosColors.error
-                            : PosColors.textMain),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    side: BorderSide(
-                        color: createTableMode
-                            ? PosColors.error.withOpacity(0.5)
-                            : PosColors.border),
-                    backgroundColor: createTableMode
-                        ? PosColors.error.withOpacity(0.1)
-                        : Colors.transparent,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Divider(color: PosColors.border, height: 1),
-          Expanded(
-            child: ClipRRect(
-              borderRadius: const BorderRadius.only(
-                bottomLeft: Radius.circular(16),
-                bottomRight: Radius.circular(16),
-              ),
-              child: InteractiveViewer(
-                constrained: false,
-                boundaryMargin: const EdgeInsets.all(300),
-                minScale: 0.2,
-                maxScale: 2.0,
-                child: CustomPaint(
-                  painter: GridPainter(),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        for (int y = 0; y < rows; y++) ...[
-                          Row(
-                            children: [
-                              for (int x = 0; x < columns; x++) ...[
-                                FloorCell(
-                                  table: store.tableAtCell(x, y),
-                                  isSelected: store.tableAtCell(x, y)?.id ==
-                                      selectedTableId,
-                                  size: 100,
-                                  createTableMode: createTableMode,
-                                  onTap: () {
-                                    final table = store.tableAtCell(x, y);
-                                    if (table != null) {
-                                      onSelectTable(table);
-                                    }
-                                    onCellTap(x, y);
-                                  },
-                                ),
-                                if (x != columns - 1)
-                                  const SizedBox(width: 10),
-                              ],
-                            ],
-                          ),
-                          if (y != rows - 1) const SizedBox(height: 10),
-                        ],
-                      ],
+          child: GlassContainer(
+            borderRadius: 0,
+            border: const Border(top: BorderSide(color: PosColors.border)),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.tonalIcon(
+                      onPressed: onAddSection,
+                      icon: const Icon(Icons.add, size: 20),
+                      label: const Text('Add section'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  if (store.sections.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      child: Center(
+                        child: Text(
+                          'Create a section first, then add tables under it.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.outfit(
+                            color: PosColors.textMuted,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ...store.sections.map(
+                    (sec) => Padding(
+                      padding: const EdgeInsets.only(bottom: 20),
+                      child: _FloorSectionBlock(
+                        section: sec,
+                        store: store,
+                        selectedTableId: selectedTableId,
+                        onSelectTable: onSelectTable,
+                        onAddTable: () => onAddTableInSection(sec.id),
+                        onDeleteSection: () => onDeleteSection(sec),
+                        onBillPreview: onBillPreview,
+                      ),
+                    ),
+                  ),
+                  if (store.tablesWithoutSection.isNotEmpty) ...[
+                    Text(
+                      'Other tables',
+                      style: GoogleFonts.outfit(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: PosColors.textMain,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        for (final t in store.tablesWithoutSection)
+                          _SectionTableTile(
+                            table: t,
+                            selected: t.id == selectedTableId,
+                            store: store,
+                            onTap: () => onSelectTable(t),
+                            onBillPreview: () => onBillPreview(t),
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _LegendDot extends StatelessWidget {
-  final Color color;
-  final String label;
-
-  const _LegendDot({required this.color, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 10,
-          height: 10,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: color,
-          ),
         ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: GoogleFonts.outfit(
-            color: PosColors.textMuted,
-            fontWeight: FontWeight.w600,
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 340,
+          child: TableWorkbench(
+            store: store,
+            selectedTable: selectedTableId != null
+                ? store.tableById(selectedTableId!)
+                : null,
+            onAddOrder: onAddOrder,
+            onQuickAddItem: onQuickAddItem,
+            onSettle: onSettle,
+            onMarkOccupied: onMarkOccupied,
+            onDeleteTable: onDeleteTable,
           ),
         ),
       ],
@@ -1059,148 +1188,238 @@ class _LegendDot extends StatelessWidget {
   }
 }
 
-class GridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = PosColors.border.withOpacity(0.5)
-      ..strokeWidth = 1.0;
-    
-    const double step = 20.0;
-    for (double i = 0; i < size.width; i += step) {
-      canvas.drawLine(Offset(i, 0), Offset(i, size.height), paint);
-    }
-    for (double i = 0; i < size.height; i += step) {
-      canvas.drawLine(Offset(0, i), Offset(size.width, i), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class FloorCell extends StatelessWidget {
-  const FloorCell({
-    required this.table,
-    required this.isSelected,
-    required this.size,
-    required this.createTableMode,
-    required this.onTap,
-    super.key,
+class _FloorSectionBlock extends StatelessWidget {
+  const _FloorSectionBlock({
+    required this.section,
+    required this.store,
+    required this.selectedTableId,
+    required this.onSelectTable,
+    required this.onAddTable,
+    required this.onDeleteSection,
+    required this.onBillPreview,
   });
 
-  final DiningTable? table;
-  final bool isSelected;
-  final double size;
-  final bool createTableMode;
-  final VoidCallback onTap;
+  final FloorSection section;
+  final RestaurantStore store;
+  final String? selectedTableId;
+  final ValueChanged<DiningTable> onSelectTable;
+  final VoidCallback onAddTable;
+  final VoidCallback onDeleteSection;
+  final void Function(DiningTable table) onBillPreview;
 
   @override
   Widget build(BuildContext context) {
-    if (table == null) {
-      return GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            color: createTableMode
-                ? PosColors.primary.withOpacity(0.05)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: createTableMode
-                  ? PosColors.primary.withOpacity(0.3)
-                  : Colors.transparent,
-              width: createTableMode ? 2 : 1,
-            ),
-          ),
-          child: Center(
-            child: Icon(
-              createTableMode ? Icons.add : Icons.add,
-              color: createTableMode
-                  ? PosColors.primary.withOpacity(0.5)
-                  : Colors.transparent,
-              size: 32,
-            ),
-          ),
-        ),
-      );
-    }
+    final tables = store.tablesInSection(section.id);
 
-    final isOccupied = table!.status == TableStatus.occupied;
-    final statusColor = isOccupied ? PosColors.warning : PosColors.accent;
-    final borderColor = isSelected ? PosColors.primary : statusColor;
-
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        width: size,
-        height: size,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor, width: isSelected ? 2 : 1),
-        ),
-        child: Stack(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-          if (isOccupied)
-            Positioned(
-              top: 6,
-              right: 6,
-              child: Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: statusColor,
-                  boxShadow: [
-                    BoxShadow(
-                      color: statusColor.withOpacity(0.8),
-                      blurRadius: 6,
-                      spreadRadius: 1,
-                    )
-                  ],
+            Expanded(
+              child: Text(
+                section.name,
+                style: GoogleFonts.outfit(
+                  fontSize: 17,
+                  fontWeight: FontWeight.bold,
+                  color: PosColors.textMain,
                 ),
               ),
             ),
-          Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(
-                  isOccupied ? Icons.restaurant : Icons.table_restaurant,
-                  color: statusColor,
-                  size: 28,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  table!.name,
-                  style: GoogleFonts.outfit(
-                    color: PosColors.textMain,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${table!.capacity} Seats',
-                  style: GoogleFonts.outfit(
-                    color: PosColors.textMuted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ],
+            IconButton(
+              tooltip: 'Add table',
+              onPressed: onAddTable,
+              icon: const Icon(Icons.add_circle_outline, color: PosColors.primary),
+            ),
+            IconButton(
+              tooltip: 'Delete section',
+              onPressed: onDeleteSection,
+              icon: Icon(
+                Icons.delete_outline,
+                color: PosColors.error.withValues(alpha: 0.85),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        if (tables.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'No tables yet — tap + to add.',
+              style: GoogleFonts.outfit(fontSize: 13, color: PosColors.textMuted),
             ),
           ),
-        ],
-      ),
-    ),
-  );
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            for (final t in tables)
+              _SectionTableTile(
+                table: t,
+                selected: t.id == selectedTableId,
+                store: store,
+                onTap: () => onSelectTable(t),
+                onBillPreview: () => onBillPreview(t),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
 }
+
+class _SectionTableTile extends StatelessWidget {
+  const _SectionTableTile({
+    required this.table,
+    required this.selected,
+    required this.store,
+    required this.onTap,
+    required this.onBillPreview,
+  });
+
+  final DiningTable table;
+  final bool selected;
+  final RestaurantStore store;
+  final VoidCallback onTap;
+  final VoidCallback onBillPreview;
+
+  static const double _cardSize = 104;
+
+  String _durationLabel() {
+    final start = table.orderStartedAt;
+    if (start == null) {
+      return '';
+    }
+    final m = DateTime.now().difference(start).inMinutes;
+    return '$m Min';
+  }
+
+  String _amountLine() {
+    if (table.activeOrderTotal != null) {
+      return '₹ ${table.activeOrderTotal!.toStringAsFixed(2)}';
+    }
+    if (table.status == TableStatus.occupied) {
+      return store.calculateBill(table.id).totalFormatted;
+    }
+    return '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final occupied = table.status == TableStatus.occupied;
+    final bg =
+        occupied ? const Color(0xFFFFF9E6) : const Color(0xFFF3F4F6);
+    final borderColor = selected ? PosColors.primary : PosColors.border;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          width: _cardSize,
+          height: _cardSize,
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor, width: selected ? 2 : 1.2),
+          ),
+          child: occupied
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (table.orderStartedAt != null)
+                      Text(
+                        _durationLabel(),
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.outfit(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      )
+                    else
+                      const SizedBox(height: 11),
+                    Expanded(
+                      child: Center(
+                        child: Text(
+                          table.name,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.outfit(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                            color: PosColors.textMain,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (_amountLine().isNotEmpty)
+                      Text(
+                        _amountLine(),
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.outfit(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: PosColors.textMain,
+                        ),
+                      ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _MiniIconButton(
+                          icon: Icons.print_rounded,
+                          onPressed: onBillPreview,
+                        ),
+                        const SizedBox(width: 8),
+                        _MiniIconButton(
+                          icon: Icons.visibility_outlined,
+                          onPressed: onTap,
+                        ),
+                      ],
+                    ),
+                  ],
+                )
+              : Center(
+                  child: Text(
+                    table.name,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.outfit(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: PosColors.textMain,
+                    ),
+                  ),
+                ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MiniIconButton extends StatelessWidget {
+  const _MiniIconButton({required this.icon, required this.onPressed});
+
+  final IconData icon;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 28,
+      height: 28,
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(6),
+          child: Icon(icon, size: 16, color: PosColors.textMain),
+        ),
+      ),
+    );
+  }
 }
 
 class TableWorkbench extends StatelessWidget {
@@ -1633,12 +1852,14 @@ class _SummaryRow extends StatelessWidget {
 class MenuSection extends StatelessWidget {
   const MenuSection({
     required this.store,
+    required this.canDeleteMenuItems,
     required this.onAddMenuItem,
     required this.onDeleteMenuItem,
     super.key,
   });
 
   final RestaurantStore store;
+  final bool canDeleteMenuItems;
   final Future<void> Function() onAddMenuItem;
   final Future<void> Function(MenuItem item) onDeleteMenuItem;
 
@@ -1757,14 +1978,16 @@ class MenuSection extends StatelessWidget {
                                   color: PosColors.accent,
                                 ),
                               ),
-                              const SizedBox(width: 16),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline,
-                                    color: PosColors.error, size: 20),
-                                onPressed: () => onDeleteMenuItem(item),
-                                padding: EdgeInsets.zero,
-                                constraints: const BoxConstraints(),
-                              ),
+                              if (canDeleteMenuItems) ...[
+                                const SizedBox(width: 16),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: PosColors.error, size: 20),
+                                  onPressed: () => onDeleteMenuItem(item),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                ),
+                              ],
                             ],
                           ),
                         );
@@ -2631,401 +2854,3 @@ class _AddOrderDialogState extends State<AddOrderDialog> {
   }
 }
 
-// --- DATA MODELS & STORE ---
-
-enum TableStatus { available, occupied }
-
-extension TableStatusX on TableStatus {
-  String get label {
-    switch (this) {
-      case TableStatus.available:
-        return 'Available';
-      case TableStatus.occupied:
-        return 'Occupied';
-    }
-  }
-}
-
-class DiningTable {
-  const DiningTable({
-    required this.id,
-    required this.name,
-    required this.capacity,
-    required this.status,
-    required this.gridX,
-    required this.gridY,
-  });
-
-  final String id;
-  final String name;
-  final int capacity;
-  final TableStatus status;
-  final int gridX;
-  final int gridY;
-
-  DiningTable copyWith({
-    String? id,
-    String? name,
-    int? capacity,
-    TableStatus? status,
-    int? gridX,
-    int? gridY,
-  }) {
-    return DiningTable(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      capacity: capacity ?? this.capacity,
-      status: status ?? this.status,
-      gridX: gridX ?? this.gridX,
-      gridY: gridY ?? this.gridY,
-    );
-  }
-
-  String get statusLabel => status.label;
-}
-
-class MenuItem {
-  const MenuItem({
-    required this.id,
-    required this.name,
-    required this.category,
-    required this.price,
-  });
-
-  final String id;
-  final String name;
-  final String category;
-  final double price;
-
-  String get formattedPrice => price.toCurrency();
-}
-
-class OrderLine {
-  const OrderLine({required this.menuItemId, required this.quantity});
-
-  final String menuItemId;
-  final int quantity;
-
-  OrderLine copyWith({String? menuItemId, int? quantity}) {
-    return OrderLine(
-      menuItemId: menuItemId ?? this.menuItemId,
-      quantity: quantity ?? this.quantity,
-    );
-  }
-}
-
-class TableOrder {
-  const TableOrder({required this.tableId, required this.lines});
-
-  final String tableId;
-  final List<OrderLine> lines;
-
-  TableOrder copyWith({String? tableId, List<OrderLine>? lines}) {
-    return TableOrder(
-      tableId: tableId ?? this.tableId,
-      lines: lines ?? this.lines,
-    );
-  }
-}
-
-class BillLine {
-  const BillLine({
-    required this.itemName,
-    required this.unitPrice,
-    required this.quantity,
-    required this.lineTotal,
-  });
-
-  final String itemName;
-  final double unitPrice;
-  final int quantity;
-  final double lineTotal;
-
-  String get unitPriceFormatted => unitPrice.toCurrency();
-  String get lineTotalFormatted => lineTotal.toCurrency();
-}
-
-class BillTotals {
-  const BillTotals({
-    required this.subtotal,
-    required this.tax,
-    required this.total,
-  });
-
-  final double subtotal;
-  final double tax;
-  final double total;
-
-  String get subtotalFormatted => subtotal.toCurrency();
-  String get taxFormatted => tax.toCurrency();
-  String get totalFormatted => total.toCurrency();
-}
-
-class TransactionRecord {
-  final String id;
-  final String tableName;
-  final DateTime timestamp;
-  final List<BillLine> lines;
-  final BillTotals totals;
-
-  TransactionRecord({
-    required this.id,
-    required this.tableName,
-    required this.timestamp,
-    required this.lines,
-    required this.totals,
-  });
-}
-
-class RestaurantStore extends ChangeNotifier {
-  static const double _taxRate = 0.10;
-
-  RestaurantStore._();
-
-  int _counter = 1;
-  final List<DiningTable> _tables = [];
-  final List<MenuItem> _menuItems = [];
-  final Map<String, TableOrder> _ordersByTable = {};
-  final List<TransactionRecord> _transactions = [];
-
-  factory RestaurantStore.seeded() {
-    final store = RestaurantStore._();
-
-    store
-      ..addTable(name: 'T-1', capacity: 4, gridX: 1, gridY: 1, shouldNotify: false)
-      ..addTable(name: 'T-2', capacity: 2, gridX: 3, gridY: 1, shouldNotify: false)
-      ..addTable(name: 'T-3', capacity: 4, gridX: 5, gridY: 2, shouldNotify: false)
-      ..addTable(name: 'Booth A', capacity: 6, gridX: 7, gridY: 3, shouldNotify: false)
-      ..addTable(name: 'T-5', capacity: 4, gridX: 2, gridY: 4, shouldNotify: false)
-      ..addMenuItem(name: 'Classic Burger', category: 'Main', price: 9.99, shouldNotify: false)
-      ..addMenuItem(name: 'French Fries', category: 'Sides', price: 3.49, shouldNotify: false)
-      ..addMenuItem(name: 'Paneer Tikka', category: 'Starters', price: 7.25, shouldNotify: false)
-      ..addMenuItem(name: 'Veg Biryani', category: 'Main', price: 8.75, shouldNotify: false)
-      ..addMenuItem(name: 'Lemonade', category: 'Drinks', price: 2.50, shouldNotify: false)
-      ..addMenuItem(name: 'Brownie', category: 'Dessert', price: 4.20, shouldNotify: false);
-
-    return store;
-  }
-
-  UnmodifiableListView<DiningTable> get tables => UnmodifiableListView(_tables);
-  UnmodifiableListView<MenuItem> get menuItems => UnmodifiableListView(_menuItems);
-  UnmodifiableListView<TransactionRecord> get transactions => UnmodifiableListView(_transactions);
-
-  String _nextId(String prefix) {
-    final value = '$prefix-$_counter';
-    _counter += 1;
-    return value;
-  }
-
-  DiningTable? tableById(String tableId) {
-    return _tables.where((table) => table.id == tableId).firstOrNull;
-  }
-
-  DiningTable? tableAtCell(int gridX, int gridY) {
-    return _tables
-        .where((table) => table.gridX == gridX && table.gridY == gridY)
-        .firstOrNull;
-  }
-
-  DiningTable? addTable({
-    required String name,
-    required int capacity,
-    required int gridX,
-    required int gridY,
-    bool shouldNotify = true,
-  }) {
-    if (tableAtCell(gridX, gridY) != null) {
-      return null;
-    }
-
-    final table = DiningTable(
-      id: _nextId('table'),
-      name: name,
-      capacity: capacity,
-      status: TableStatus.available,
-      gridX: gridX,
-      gridY: gridY,
-    );
-
-    _tables.add(table);
-
-    if (shouldNotify) {
-      notifyListeners();
-    }
-
-    return table;
-  }
-
-  bool removeTable(String tableId) {
-    if (hasActiveOrder(tableId)) {
-      return false;
-    }
-
-    _tables.removeWhere((table) => table.id == tableId);
-    notifyListeners();
-    return true;
-  }
-
-  void addMenuItem({
-    required String name,
-    required String category,
-    required double price,
-    bool shouldNotify = true,
-  }) {
-    _menuItems.add(
-      MenuItem(
-        id: _nextId('item'),
-        name: name,
-        category: category,
-        price: price,
-      ),
-    );
-
-    if (shouldNotify) {
-      notifyListeners();
-    }
-  }
-
-  bool removeMenuItem(String menuItemId) {
-    for (final order in _ordersByTable.values) {
-      if (order.lines.any((line) => line.menuItemId == menuItemId)) {
-        return false;
-      }
-    }
-
-    _menuItems.removeWhere((item) => item.id == menuItemId);
-    notifyListeners();
-    return true;
-  }
-
-  bool hasActiveOrder(String tableId) {
-    final order = _ordersByTable[tableId];
-    return order != null && order.lines.isNotEmpty;
-  }
-
-  void addItemToOrder({
-    required String tableId,
-    required String menuItemId,
-    required int quantity,
-  }) {
-    if (quantity <= 0) {
-      return;
-    }
-
-    final menuExists = _menuItems.any((item) => item.id == menuItemId);
-    if (!menuExists) {
-      return;
-    }
-
-    final current = _ordersByTable[tableId] ??
-        TableOrder(
-          tableId: tableId,
-          lines: const [],
-        );
-
-    final nextLines = List<OrderLine>.from(current.lines);
-    final existingIndex = nextLines.indexWhere((line) => line.menuItemId == menuItemId);
-
-    if (existingIndex == -1) {
-      nextLines.add(OrderLine(menuItemId: menuItemId, quantity: quantity));
-    } else {
-      final existing = nextLines[existingIndex];
-      nextLines[existingIndex] = existing.copyWith(quantity: existing.quantity + quantity);
-    }
-
-    _ordersByTable[tableId] = current.copyWith(lines: nextLines);
-    _setTableStatus(tableId, TableStatus.occupied);
-    notifyListeners();
-  }
-
-  List<BillLine> orderDetailsForTable(String tableId) {
-    final order = _ordersByTable[tableId];
-    if (order == null) {
-      return const [];
-    }
-
-    return order.lines
-        .map((line) {
-          final menuItem = _menuItems.where((item) => item.id == line.menuItemId).firstOrNull;
-          if (menuItem == null) {
-            return null;
-          }
-
-          final total = menuItem.price * line.quantity;
-
-          return BillLine(
-            itemName: menuItem.name,
-            unitPrice: menuItem.price,
-            quantity: line.quantity,
-            lineTotal: total,
-          );
-        })
-        .whereType<BillLine>()
-        .toList(growable: false);
-  }
-
-  BillTotals calculateBill(String tableId) {
-    final lines = orderDetailsForTable(tableId);
-    final subtotal = lines.fold<double>(0, (sum, line) => sum + line.lineTotal);
-    final tax = subtotal * _taxRate;
-    final total = subtotal + tax;
-
-    return BillTotals(subtotal: subtotal, tax: tax, total: total);
-  }
-
-  void markTableOccupied(String tableId) {
-    _setTableStatus(tableId, TableStatus.occupied);
-    notifyListeners();
-  }
-
-  void settleBill(String tableId) {
-    final table = tableById(tableId);
-    if (table == null) return;
-
-    final lines = orderDetailsForTable(tableId);
-    if (lines.isEmpty) {
-      _setTableStatus(tableId, TableStatus.available);
-      notifyListeners();
-      return;
-    }
-
-    final totals = calculateBill(tableId);
-
-    final transaction = TransactionRecord(
-      id: _nextId('txn'),
-      tableName: table.name,
-      timestamp: DateTime.now(),
-      lines: lines,
-      totals: totals,
-    );
-
-    _transactions.insert(0, transaction);
-    _ordersByTable.remove(tableId);
-    _setTableStatus(tableId, TableStatus.available);
-    notifyListeners();
-  }
-
-  void _setTableStatus(String tableId, TableStatus status) {
-    final index = _tables.indexWhere((table) => table.id == tableId);
-    if (index == -1) {
-      return;
-    }
-
-    _tables[index] = _tables[index].copyWith(status: status);
-  }
-}
-
-extension NumCurrencyFormatting on num {
-  String toCurrency() {
-    return '₹${toStringAsFixed(2)}';
-  }
-}
-
-extension FirstOrNullExtension<T> on Iterable<T> {
-  T? get firstOrNull {
-    if (isEmpty) {
-      return null;
-    }
-    return first;
-  }
-}
