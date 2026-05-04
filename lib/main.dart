@@ -764,10 +764,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           onBillPreview: _showBillPreview,
           onAddOrder: _openAddOrderDialogForSelected,
           onQuickAddItem: _quickAddToSelected,
-          onSettle: () {
+          onSettle: (paymentMethod) {
             final table = _selectedTable;
             if (table != null) {
-              widget.store.markTablePaid(table.id).then((_) {
+              widget.store
+                  .markTablePaid(table.id, paymentMethod: paymentMethod)
+                  .then((_) {
                 if (mounted) setState(() {});
               });
             }
@@ -792,8 +794,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
       case PosSection.billing:
         return BillingSection(
           store: widget.store,
-          onSettle: (table) {
-            widget.store.markTablePaid(table.id).then((_) {
+          onSettle: (table, paymentMethod) {
+            widget.store
+                .markTablePaid(table.id, paymentMethod: paymentMethod)
+                .then((_) {
               if (mounted) setState(() {});
             });
           },
@@ -1282,7 +1286,8 @@ class RestaurantFloorTab extends StatefulWidget {
   final void Function(DiningTable table) onBillPreview;
   final VoidCallback onAddOrder;
   final ValueChanged<MenuItem> onQuickAddItem;
-  final VoidCallback onSettle;
+  /// Called with API payment method: `cash`, `upi`, or `card`.
+  final ValueChanged<String> onSettle;
   final VoidCallback onMarkOccupied;
   final VoidCallback onDeleteTable;
 
@@ -1827,6 +1832,92 @@ class _SectionTableTile extends StatelessWidget {
   }
 }
 
+/// Cashier API accepts `cash`, `upi`, or `card` for recorded payments.
+Future<String?> showPaymentMethodPicker(
+  BuildContext context, {
+  required String title,
+  required String subtitle,
+  required String amountLabel,
+}) {
+  return showModalBottomSheet<String>(
+    context: context,
+    showDragHandle: true,
+    builder: (ctx) {
+      return SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.inter(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: PosColors.textMain,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                subtitle,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: PosColors.textMuted,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                amountLabel,
+                style: GoogleFonts.inter(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: PosColors.primaryGlow,
+                ),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: PosColors.accent,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: () => Navigator.pop(ctx, 'cash'),
+                icon: const Icon(Icons.payments_outlined, size: 20),
+                label: const Text('Cash'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: PosColors.primary,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: () => Navigator.pop(ctx, 'upi'),
+                icon: const Icon(Icons.qr_code_2_outlined, size: 20),
+                label: const Text('UPI'),
+              ),
+              const SizedBox(height: 10),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: PosColors.textMain,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                onPressed: () => Navigator.pop(ctx, 'card'),
+                icon: const Icon(Icons.credit_card_outlined, size: 20),
+                label: const Text('Card'),
+              ),
+              const SizedBox(height: 4),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+}
+
 Future<void> _confirmCancelOrder(
   BuildContext context,
   RestaurantStore store,
@@ -1873,7 +1964,8 @@ class TableWorkbench extends StatelessWidget {
   final DiningTable? selectedTable;
   final VoidCallback onAddOrder;
   final ValueChanged<MenuItem> onQuickAddItem;
-  final VoidCallback onSettle;
+  /// `cash`, `upi`, or `card`.
+  final ValueChanged<String> onSettle;
   final VoidCallback onMarkOccupied;
   final VoidCallback onDeleteTable;
 
@@ -1989,7 +2081,19 @@ class TableWorkbench extends StatelessWidget {
                     if (value == 'cancel_order') {
                       _confirmCancelOrder(context, store, table);
                     }
-                    if (value == 'mark_paid') onSettle();
+                    if (value == 'mark_paid') {
+                      Future<void> go() async {
+                        final m = await showPaymentMethodPicker(
+                          context,
+                          title: 'Record payment',
+                          subtitle: table.name,
+                          amountLabel: totals.totalFormatted,
+                        );
+                        if (!context.mounted || m == null) return;
+                        onSettle(m);
+                      }
+                      go();
+                    }
                   },
                   itemBuilder: (context) => [
                     if (lines.isNotEmpty)
@@ -2017,7 +2121,7 @@ class TableWorkbench extends StatelessWidget {
                             const Icon(Icons.payments_outlined,
                                 color: PosColors.accent, size: 18),
                             const SizedBox(width: 10),
-                            Text('Mark paid',
+                            Text('Settle…',
                                 style: GoogleFonts.inter(
                                     fontSize: 13,
                                     color: PosColors.textMain)),
@@ -2289,9 +2393,20 @@ class TableWorkbench extends StatelessWidget {
                     Expanded(
                       child: Tooltip(
                         message:
-                            'Record full payment as cash and close the order',
+                            'Choose how the bill was paid, then close the order',
                         child: ElevatedButton.icon(
-                          onPressed: lines.isEmpty ? null : onSettle,
+                          onPressed: lines.isEmpty
+                              ? null
+                              : () async {
+                                  final m = await showPaymentMethodPicker(
+                                    context,
+                                    title: 'Record payment',
+                                    subtitle: table.name,
+                                    amountLabel: totals.totalFormatted,
+                                  );
+                                  if (!context.mounted || m == null) return;
+                                  onSettle(m);
+                                },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: PosColors.accent,
                             padding: const EdgeInsets.symmetric(vertical: 12),
@@ -2300,7 +2415,7 @@ class TableWorkbench extends StatelessWidget {
                           ),
                           icon:
                               const Icon(Icons.payments_outlined, size: 14),
-                          label: const Text('Mark paid',
+                          label: const Text('Settle',
                               style: TextStyle(fontSize: 11)),
                         ),
                       ),
@@ -2440,10 +2555,20 @@ class OffPremOrderWorkbench extends StatelessWidget {
                           _confirmCancelOrder(context, oid);
                         }
                         if (value == 'paid') {
-                          store.settleOrderById(oid).then((_) {
+                          Future<void> go() async {
+                            final t = store.calculateBillForOrderId(oid);
+                            final m = await showPaymentMethodPicker(
+                              context,
+                              title: 'Record payment',
+                              subtitle: headerLabel,
+                              amountLabel: t.totalFormatted,
+                            );
+                            if (!context.mounted || m == null) return;
+                            await store.settleOrderById(oid, paymentMethod: m);
                             onClearSelection();
                             onOrderUpdated();
-                          });
+                          }
+                          go();
                         }
                       },
                       itemBuilder: (ctx) => [
@@ -2455,7 +2580,7 @@ class OffPremOrderWorkbench extends StatelessWidget {
                                 Icon(Icons.payments_outlined,
                                     color: PosColors.accent, size: 18),
                                 const SizedBox(width: 10),
-                                Text('Mark paid',
+                                Text('Settle…',
                                     style: GoogleFonts.inter(fontSize: 13)),
                               ],
                             ),
@@ -2714,15 +2839,29 @@ class OffPremOrderWorkbench extends StatelessWidget {
                         Expanded(
                           child: Tooltip(
                             message:
-                                'Record full payment as cash and close the order',
+                                'Choose how the ticket was paid, then close it',
                             child: ElevatedButton.icon(
                               onPressed: lines.isEmpty
                                   ? null
-                                  : () {
-                                      store.settleOrderById(oid).then((_) {
-                                        onClearSelection();
-                                        onOrderUpdated();
-                                      });
+                                  : () async {
+                                      final t =
+                                          store.calculateBillForOrderId(oid);
+                                      final m =
+                                          await showPaymentMethodPicker(
+                                        context,
+                                        title: 'Record payment',
+                                        subtitle: headerLabel,
+                                        amountLabel: t.totalFormatted,
+                                      );
+                                      if (!context.mounted || m == null) {
+                                        return;
+                                      }
+                                      await store.settleOrderById(
+                                        oid,
+                                        paymentMethod: m,
+                                      );
+                                      onClearSelection();
+                                      onOrderUpdated();
                                     },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: PosColors.accent,
@@ -2734,7 +2873,7 @@ class OffPremOrderWorkbench extends StatelessWidget {
                               ),
                               icon: const Icon(Icons.payments_outlined,
                                   size: 14),
-                              label: const Text('Mark paid',
+                              label: const Text('Settle',
                                   style: TextStyle(fontSize: 11)),
                             ),
                           ),
@@ -2948,7 +3087,8 @@ class BillingSection extends StatelessWidget {
   });
 
   final RestaurantStore store;
-  final ValueChanged<DiningTable> onSettle;
+  /// [paymentMethod] is `cash`, `upi`, or `card`.
+  final void Function(DiningTable table, String paymentMethod) onSettle;
 
   @override
   Widget build(BuildContext context) {
@@ -3116,9 +3256,18 @@ class BillingSection extends StatelessWidget {
                               const SizedBox(width: 4),
                               Tooltip(
                                 message:
-                                    'Record full payment as cash and close the order',
+                                    'Choose how the bill was paid, then close the order',
                                 child: ElevatedButton(
-                                  onPressed: () => onSettle(table),
+                                  onPressed: () async {
+                                    final m = await showPaymentMethodPicker(
+                                      context,
+                                      title: 'Record payment',
+                                      subtitle: table.name,
+                                      amountLabel: totals.totalFormatted,
+                                    );
+                                    if (!context.mounted || m == null) return;
+                                    onSettle(table, m);
+                                  },
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: PosColors.accent,
                                     padding: const EdgeInsets.symmetric(
@@ -3127,7 +3276,7 @@ class BillingSection extends StatelessWidget {
                                     tapTargetSize:
                                         MaterialTapTargetSize.shrinkWrap,
                                   ),
-                                  child: const Text('Mark paid',
+                                  child: const Text('Settle',
                                       style: TextStyle(fontSize: 12)),
                                 ),
                               ),

@@ -927,10 +927,23 @@ class RestaurantStore extends ChangeNotifier {
     }
   }
 
-  Future<void> settleOrderById(String orderId) async {
+  static const Set<String> _paymentMethods = {'cash', 'upi', 'card'};
+
+  String _normalizePaymentMethod(String? method) {
+    final m = (method ?? 'cash').toLowerCase();
+    return _paymentMethods.contains(m) ? m : 'cash';
+  }
+
+  /// Records full payment with the given method and completes the order
+  /// (pickup / delivery). [paymentMethod] must be `cash`, `upi`, or `card`.
+  Future<void> settleOrderById(
+    String orderId, {
+    String paymentMethod = 'cash',
+  }) async {
     if (orderId.isEmpty) {
       return;
     }
+    final m = _normalizePaymentMethod(paymentMethod);
     final lines = _linesForOrderId(orderId);
     if (lines.isEmpty) {
       await refreshOffPremQueues();
@@ -952,7 +965,7 @@ class RestaurantStore extends ChangeNotifier {
         data: {
           'order_id': orderId,
           'amount': total,
-          'method': 'cash',
+          'method': m,
         },
       );
       final pid = pay.data?['id']?.toString();
@@ -988,7 +1001,13 @@ class RestaurantStore extends ChangeNotifier {
     }
   }
 
-  Future<void> settleBill(String tableId) async {
+  /// Dine-in: record full payment and free the table.
+  /// [paymentMethod]: `cash`, `upi`, or `card`.
+  Future<void> settleBill(
+    String tableId, {
+    String paymentMethod = 'cash',
+  }) async {
+    final m = _normalizePaymentMethod(paymentMethod);
     final oid = _activeOrderForTable(tableId);
     final table = tableById(tableId);
     if (table == null) {
@@ -1019,7 +1038,7 @@ class RestaurantStore extends ChangeNotifier {
         data: {
           'order_id': oid,
           'amount': total,
-          'method': 'cash',
+          'method': m,
         },
       );
       final pid = pay.data?['id']?.toString();
@@ -1038,9 +1057,13 @@ class RestaurantStore extends ChangeNotifier {
     }
   }
 
-  /// Same as [settleBill]: records **cash** for the full balance and completes
+  /// Same as [settleBill]: records payment for the full balance and completes
   /// the order so the table is free (green highlight on the floor).
-  Future<void> markTablePaid(String tableId) => settleBill(tableId);
+  Future<void> markTablePaid(
+    String tableId, {
+    String paymentMethod = 'cash',
+  }) =>
+      settleBill(tableId, paymentMethod: paymentMethod);
 
   Future<void> addItemToOrder({
     required String tableId,
