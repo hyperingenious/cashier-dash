@@ -16,6 +16,40 @@ double _dec(dynamic v) {
   return double.tryParse(v.toString()) ?? 0;
 }
 
+String _orderItemGroupKey(Map<String, dynamic> im) {
+  final mid = im['menu_item_id']?.toString();
+  if (mid != null && mid.isNotEmpty) {
+    return 'm:$mid';
+  }
+  final name = (im['name_snapshot'] ?? '').toString();
+  final price = _dec(im['price_snapshot']);
+  return 'np:$name|${price.toStringAsFixed(4)}';
+}
+
+/// Combines duplicate API rows (same menu item) into one row for display.
+List<Map<String, dynamic>> _mergeRawOrderItems(List<dynamic> items) {
+  final map = <String, Map<String, dynamic>>{};
+  for (final it in items) {
+    if (it is! Map) {
+      continue;
+    }
+    final im = Map<String, dynamic>.from(it);
+    final qty = (im['quantity'] as num?)?.toInt() ?? 0;
+    if (qty <= 0) {
+      continue;
+    }
+    final key = _orderItemGroupKey(im);
+    final prev = map[key];
+    if (prev == null) {
+      map[key] = im;
+    } else {
+      final pq = (prev['quantity'] as num?)?.toInt() ?? 0;
+      prev['quantity'] = pq + qty;
+    }
+  }
+  return map.values.toList();
+}
+
 String _dioErrorMessage(Object e) {
   if (e is DioException) {
     final uri = e.requestOptions.uri.toString();
@@ -325,16 +359,16 @@ class RestaurantStore extends ChangeNotifier {
           continue;
         }
         final order = body['order'] as Map<String, dynamic>? ?? {};
-        final items = body['items'] as List<dynamic>? ?? const [];
+        final rawItems = body['items'] as List<dynamic>? ?? const [];
+        final items = _mergeRawOrderItems(rawItems);
         final tn = order['table_number'];
         final tableName =
             tn != null ? 'T-$tn' : 'Order ${id.substring(0, 8)}';
         final created = order['created_at']?.toString();
         final ts = DateTime.tryParse(created ?? '') ?? DateTime.now();
         final lines = <BillLine>[];
-        for (final it in items) {
-          final im = it as Map<String, dynamic>;
-          final qty = im['quantity'] as int? ?? 0;
+        for (final im in items) {
+          final qty = (im['quantity'] as num?)?.toInt() ?? 0;
           final price = _dec(im['price_snapshot']);
           final name = (im['name_snapshot'] ?? '').toString();
           lines.add(
@@ -517,11 +551,11 @@ class RestaurantStore extends ChangeNotifier {
       return const [];
     }
     final d = _orderDetailById[oid];
-    final items = d?['items'] as List<dynamic>? ?? const [];
+    final rawItems = d?['items'] as List<dynamic>? ?? const [];
+    final items = _mergeRawOrderItems(rawItems);
     final out = <BillLine>[];
-    for (final it in items) {
-      final im = it as Map<String, dynamic>;
-      final qty = im['quantity'] as int? ?? 0;
+    for (final im in items) {
+      final qty = (im['quantity'] as num?)?.toInt() ?? 0;
       final price = _dec(im['price_snapshot']);
       final name = (im['name_snapshot'] ?? '').toString();
       out.add(

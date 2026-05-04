@@ -1684,33 +1684,13 @@ class TableWorkbench extends StatelessWidget {
                       final line = lines[index];
                       return Row(
                         children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: PosColors.surfaceHighlight,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(
-                                  color: PosColors.border.withOpacity(0.5)),
-                            ),
-                            alignment: Alignment.center,
-                            child: Text(
-                              '${line.quantity}x',
-                              style: GoogleFonts.outfit(
-                                fontSize: 13,
-                                color: PosColors.primaryGlow,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              line.itemName,
+                              '${line.quantity}× ${line.itemName}',
                               style: GoogleFonts.outfit(
                                 color: PosColors.textMain,
                                 fontSize: 14,
-                                fontWeight: FontWeight.w500,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
@@ -2151,6 +2131,10 @@ class BillingSection extends StatelessWidget {
                         final table = billedTables[index];
                         final totals = store.calculateBill(table.id);
                         final lines = store.orderDetailsForTable(table.id);
+                        final itemUnits = lines.fold<int>(
+                          0,
+                          (sum, line) => sum + line.quantity,
+                        );
 
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
@@ -2180,7 +2164,7 @@ class BillingSection extends StatelessWidget {
                                       ),
                                     ),
                                     Text(
-                                      '${lines.length} items ordered',
+                                      '$itemUnits items ordered',
                                       style: GoogleFonts.outfit(
                                         color: PosColors.textMuted,
                                         fontSize: 12,
@@ -2441,9 +2425,10 @@ class BillReceiptDialog extends StatelessWidget {
                 padding: const pw.EdgeInsets.only(bottom: 2),
                 child: pw.Row(
                     children: [
-                      pw.Text('${line.quantity}x ', style: const pw.TextStyle(fontSize: 9)),
                       pw.Expanded(
-                          child: pw.Text(line.itemName, style: const pw.TextStyle(fontSize: 9))),
+                          child: pw.Text(
+                            '${line.quantity}× ${line.itemName}',
+                            style: const pw.TextStyle(fontSize: 9))),
                       pw.Text(line.lineTotalFormatted, style: const pw.TextStyle(fontSize: 9)),
                     ],
                   ))),
@@ -2554,18 +2539,24 @@ class BillReceiptDialog extends StatelessWidget {
                       padding: const EdgeInsets.only(bottom: 10),
                       child: Row(
                         children: [
-                          Container(
-                            width: 24,
-                            alignment: Alignment.centerLeft,
-                            child: Text('${line.quantity}x', 
-                              style: GoogleFonts.outfit(color: PosColors.textMuted, fontSize: 13)),
-                          ),
                           Expanded(
-                            child: Text(line.itemName, 
-                              style: GoogleFonts.outfit(color: PosColors.textMain, fontSize: 14)),
+                            child: Text(
+                              '${line.quantity}× ${line.itemName}',
+                              style: GoogleFonts.outfit(
+                                color: PosColors.textMain,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
                           ),
-                          Text(line.lineTotalFormatted, 
-                            style: GoogleFonts.outfit(color: PosColors.textMain, fontSize: 14, fontWeight: FontWeight.w500)),
+                          Text(
+                            line.lineTotalFormatted,
+                            style: GoogleFonts.outfit(
+                              color: PosColors.textMain,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ],
                       ),
                     );
