@@ -15,6 +15,23 @@ double _dec(dynamic v) {
   return double.tryParse(v.toString()) ?? 0;
 }
 
+String _dioErrorMessage(Object e) {
+  if (e is DioException) {
+    final data = e.response?.data;
+    if (data is Map && data['error'] is String) {
+      return data['error'] as String;
+    }
+    if (data is String && data.trim().isNotEmpty) {
+      return data.trim();
+    }
+    final code = e.response?.statusCode;
+    if (code != null) {
+      return 'Request failed ($code)';
+    }
+  }
+  return e.toString();
+}
+
 class RestaurantStore extends ChangeNotifier {
   RestaurantStore._(this._dio);
 
@@ -409,7 +426,7 @@ class RestaurantStore extends ChangeNotifier {
       await refreshMenu();
       return true;
     } catch (e) {
-      lastError = e.toString();
+      lastError = _dioErrorMessage(e);
       notifyListeners();
       return false;
     }
