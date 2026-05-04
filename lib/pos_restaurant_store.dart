@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -33,25 +34,58 @@ String _dioErrorMessage(Object e) {
 }
 
 class RestaurantStore extends ChangeNotifier {
-  RestaurantStore._(this._dio);
+  RestaurantStore._(this._dio, {this.cashierRestaurantId});
+
+  /// Root URL only (e.g. `https://host:8000`). Paths use `/api/cashier/...`.
+  /// Strips accidental `/api` or `/api/cashier` suffixes so requests are not doubled.
+  static String normalizeApiBaseUrl(String input) {
+    var u = input.trim();
+    if (u.isEmpty) {
+      return 'http://localhost:8000';
+    }
+    while (u.endsWith('/')) {
+      u = u.substring(0, u.length - 1);
+    }
+    if (u.endsWith('/api/cashier')) {
+      u = u.substring(0, u.length - '/api/cashier'.length);
+    }
+    while (u.endsWith('/')) {
+      u = u.substring(0, u.length - 1);
+    }
+    if (u.endsWith('/api')) {
+      u = u.substring(0, u.length - '/api'.length);
+    }
+    while (u.endsWith('/')) {
+      u = u.substring(0, u.length - 1);
+    }
+    return u.isEmpty ? 'http://localhost:8000' : u;
+  }
 
   factory RestaurantStore.connect({
     required String baseUrl,
     required String token,
+    String? cashierRestaurantId,
   }) {
+    final root = normalizeApiBaseUrl(baseUrl);
     final dio = Dio(
       BaseOptions(
-        baseUrl: baseUrl.replaceAll(RegExp(r'/$'), ''),
+        baseUrl: root,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         },
       ),
     );
-    return RestaurantStore._(dio)..refreshAll();
+    return RestaurantStore._(
+      dio,
+      cashierRestaurantId: cashierRestaurantId,
+    )..refreshAll();
   }
 
   final Dio _dio;
+
+  /// From login `user.restaurant_id` (same tenant as admin menu for this cashier).
+  final String? cashierRestaurantId;
 
   final List<DiningTable> _tables = [];
   final List<FloorSection> _sections = [];
@@ -64,6 +98,11 @@ class RestaurantStore extends ChangeNotifier {
 
   /// Removing catalog rows is reserved for the admin app; cashiers only add via API.
   bool get canDeleteMenuItems => false;
+
+  void clearLastError() {
+    lastError = null;
+    notifyListeners();
+  }
 
   UnmodifiableListView<DiningTable> get tables =>
       UnmodifiableListView(_tables);
@@ -113,23 +152,42 @@ class RestaurantStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  List<dynamic> _decodeJsonList(dynamic raw) {
+    if (raw == null) {
+      return [];
+    }
+    if (raw is List) {
+      return raw;
+    }
+    if (raw is String) {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return decoded;
+      }
+    }
+    throw Exception(
+      'Menu API expected a JSON array, got ${raw.runtimeType}',
+    );
+  }
+
+  Map<String, dynamic> _rowAsMap(dynamic item) {
+    if (item is Map<String, dynamic>) {
+      return item;
+    }
+    if (item is Map) {
+      return Map<String, dynamic>.from(item);
+    }
+    throw Exception('Menu row must be an object, got ${item.runtimeType}');
+  }
+
   Future<void> _loadMenu() async {
     final res = await _dio.get<dynamic>('/api/cashier/menu');
-    final raw = res.data;
-    if (raw == null) {
-      _menuItems.clear();
-      return;
-    }
-    if (raw is! List) {
-      throw Exception(
-        'Menu API expected a JSON array, got ${raw.runtimeType}',
-      );
-    }
+    final rows = _decodeJsonList(res.data);
     _menuItems
       ..clear()
       ..addAll(
-        raw.map((dynamic item) {
-          final m = item as Map<String, dynamic>;
+        rows.map((dynamic item) {
+          final m = _rowAsMap(item);
           return MenuItem(
             id: (m['id'] ?? '').toString(),
             name: (m['name'] ?? '').toString(),

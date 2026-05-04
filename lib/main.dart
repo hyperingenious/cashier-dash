@@ -42,11 +42,12 @@ class _CashierDashAppState extends State<CashierDashApp> {
   RestaurantStore? _store;
   String _cashierName = '';
 
-  void _handleLogin(String token, String cashierName) {
+  void _handleLogin(String token, String cashierName, String? restaurantId) {
     setState(() {
       _store = RestaurantStore.connect(
         baseUrl: apiBaseUrl,
         token: token,
+        cashierRestaurantId: restaurantId,
       );
       _cashierName = cashierName;
     });
@@ -169,7 +170,8 @@ class GlassContainer extends StatelessWidget {
 class LoginScreen extends StatefulWidget {
   const LoginScreen({required this.onLogin, super.key});
 
-  final void Function(String token, String cashierName) onLogin;
+  final void Function(String token, String cashierName, String? restaurantId)
+      onLogin;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -212,7 +214,7 @@ class _LoginScreenState extends State<LoginScreen>
     try {
       final dio = Dio(
         BaseOptions(
-          baseUrl: apiBaseUrl.replaceAll(RegExp(r'/$'), ''),
+          baseUrl: RestaurantStore.normalizeApiBaseUrl(apiBaseUrl),
           headers: {'Content-Type': 'application/json'},
         ),
       );
@@ -226,13 +228,14 @@ class _LoginScreenState extends State<LoginScreen>
       final token = res.data?['token'] as String?;
       final user = res.data?['user'] as Map<String, dynamic>?;
       final name = user?['name'] as String? ?? 'Cashier';
+      final restaurantId = user?['restaurant_id']?.toString();
       if (token == null || token.isEmpty) {
         throw Exception('No token in response');
       }
       if (!mounted) {
         return;
       }
-      widget.onLogin(token, name);
+      widget.onLogin(token, name, restaurantId);
     } catch (e) {
       if (!mounted) {
         return;
@@ -793,9 +796,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
+                          _DashboardLoadBanner(store: widget.store),
                           DashboardTopBar(
-                              section: _section,
-                              cashierName: widget.cashierName),
+                            section: _section,
+                            cashierName: widget.cashierName,
+                            restaurantId: widget.store.cashierRestaurantId,
+                          ),
                           Expanded(
                             child: AnimatedSwitcher(
                               duration: const Duration(milliseconds: 300),
@@ -946,15 +952,67 @@ class _SidebarItem extends StatelessWidget {
   }
 }
 
+class _DashboardLoadBanner extends StatelessWidget {
+  const _DashboardLoadBanner({required this.store});
+
+  final RestaurantStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final err = store.lastError;
+    if (err == null || err.trim().isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Material(
+      color: const Color(0xFFFFF7ED),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: Color(0xFFEA580C),
+              size: 22,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                err,
+                style: GoogleFonts.outfit(
+                  fontSize: 13,
+                  color: const Color(0xFF9A3412),
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                store.refreshAll();
+              },
+              child: const Text('Retry'),
+            ),
+            TextButton(
+              onPressed: store.clearLastError,
+              child: const Text('Dismiss'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class DashboardTopBar extends StatelessWidget {
   const DashboardTopBar({
     required this.section,
     required this.cashierName,
+    this.restaurantId,
     super.key,
   });
 
   final PosSection section;
   final String cashierName;
+  final String? restaurantId;
 
   @override
   Widget build(BuildContext context) {
@@ -982,6 +1040,18 @@ class DashboardTopBar extends StatelessWidget {
                     color: PosColors.textMuted,
                   ),
                 ),
+                if (restaurantId case final String rid when rid.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Signed-in restaurant: $rid — menu is only items for this tenant. '
+                    'In Admin, select the same restaurant when adding menu items.',
+                    style: GoogleFonts.outfit(
+                      fontSize: 11,
+                      color: PosColors.textMuted,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
               ],
             ),
             const Spacer(),
