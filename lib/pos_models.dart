@@ -122,12 +122,18 @@ class BillLine {
     required this.unitPrice,
     required this.quantity,
     required this.lineTotal,
+    this.orderItemId,
+    this.menuItemId,
   });
 
   final String itemName;
   final double unitPrice;
   final int quantity;
   final double lineTotal;
+  /// `order_items.id` for the active order; used to remove or change quantity.
+  final String? orderItemId;
+  /// `menu_items.id` when known; used to add units with the same API as Quick Add.
+  final String? menuItemId;
 
   String get unitPriceFormatted => unitPrice.toCurrency();
   String get lineTotalFormatted => lineTotal.toCurrency();

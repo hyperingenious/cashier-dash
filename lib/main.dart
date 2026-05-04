@@ -1470,6 +1470,36 @@ class _SectionTableTile extends StatelessWidget {
   }
 }
 
+Future<void> _confirmCancelOrder(
+  BuildContext context,
+  RestaurantStore store,
+  DiningTable table,
+) async {
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Cancel order'),
+      content: Text(
+        'Void this order for ${table.name} and remove all lines?',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('Keep'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          style: FilledButton.styleFrom(backgroundColor: PosColors.error),
+          child: const Text('Cancel order'),
+        ),
+      ],
+    ),
+  );
+  if (ok == true && context.mounted) {
+    await store.cancelActiveOrder(table.id);
+  }
+}
+
 class TableWorkbench extends StatelessWidget {
   const TableWorkbench({
     required this.store,
@@ -1599,8 +1629,27 @@ class TableWorkbench extends StatelessWidget {
                   onSelected: (value) {
                     if (value == 'occupy') onMarkOccupied();
                     if (value == 'delete') onDeleteTable();
+                    if (value == 'cancel_order') {
+                      _confirmCancelOrder(context, store, table);
+                    }
                   },
                   itemBuilder: (context) => [
+                    if (lines.isNotEmpty)
+                      PopupMenuItem(
+                        value: 'cancel_order',
+                        height: 36,
+                        child: Row(
+                          children: [
+                            const Icon(Icons.cancel_outlined,
+                                color: PosColors.error, size: 18),
+                            const SizedBox(width: 10),
+                            Text('Cancel order',
+                                style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: PosColors.error)),
+                          ],
+                        ),
+                      ),
                     PopupMenuItem(
                       value: 'occupy',
                       height: 36,
@@ -1660,15 +1709,48 @@ class TableWorkbench extends StatelessWidget {
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final line = lines[index];
+                      final oid = line.orderItemId;
+                      final mid = line.menuItemId;
+                      final canChQty = oid != null && oid.isNotEmpty;
+                      final canAddUnit =
+                          mid != null && mid.isNotEmpty && store.hasActiveOrder(table.id);
                       return Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
+                          IconAction(
+                            icon: Icons.remove,
+                            tooltip: 'Decrease quantity',
+                            onTap: !canChQty
+                                ? () {}
+                                : () => store.setOrderItemQuantity(
+                                      table.id,
+                                      oid,
+                                      line.quantity - 1,
+                                    ),
+                          ),
+                          IconAction(
+                            icon: Icons.add,
+                            tooltip: 'Increase quantity',
+                            onTap: !canAddUnit
+                                ? () {}
+                                : () => store.addItemToOrder(
+                                      tableId: table.id,
+                                      menuItemId: mid,
+                                      quantity: 1,
+                                    ),
+                          ),
                           Expanded(
-                            child: Text(
-                              '${line.quantity}× ${line.itemName}',
-                              style: GoogleFonts.inter(
-                                color: PosColors.textMain,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 8),
+                              child: Text(
+                                '${line.quantity}× ${line.itemName}',
+                                style: GoogleFonts.inter(
+                                  color: PosColors.textMain,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
                           ),
@@ -1679,6 +1761,18 @@ class TableWorkbench extends StatelessWidget {
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
                             ),
+                          ),
+                          const SizedBox(width: 4),
+                          IconAction(
+                            icon: Icons.close,
+                            tooltip: 'Remove line',
+                            danger: true,
+                            onTap: !canChQty
+                                ? () {}
+                                : () => store.removeOrderItemLine(
+                                      table.id,
+                                      oid,
+                                    ),
                           ),
                         ],
                       );
@@ -2187,6 +2281,23 @@ class BillingSection extends StatelessWidget {
                                 child: const Text('Bill', style: TextStyle(fontSize: 12)),
                               ),
                               const SizedBox(width: 8),
+                              TextButton(
+                                onPressed: () => _confirmCancelOrder(
+                                  context,
+                                  store,
+                                  table,
+                                ),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: PosColors.error,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 8),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize:
+                                      MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: const Text('Void', style: TextStyle(fontSize: 12)),
+                              ),
+                              const SizedBox(width: 4),
                               ElevatedButton(
                                 onPressed: () => onSettle(table),
                                 style: ElevatedButton.styleFrom(

@@ -612,12 +612,18 @@ class RestaurantStore extends ChangeNotifier {
       final qty = (im['quantity'] as num?)?.toInt() ?? 0;
       final price = _dec(im['price_snapshot']);
       final name = (im['name_snapshot'] ?? '').toString();
+      final idRaw = im['id'];
+      final oidStr = idRaw == null ? null : idRaw.toString().trim();
+      final midRaw = im['menu_item_id'];
+      final midStr = midRaw == null ? null : midRaw.toString().trim();
       out.add(
         BillLine(
           itemName: name,
           unitPrice: price,
           quantity: qty,
           lineTotal: price * qty,
+          orderItemId: (oidStr == null || oidStr.isEmpty) ? null : oidStr,
+          menuItemId: (midStr == null || midStr.isEmpty) ? null : midStr,
         ),
       );
     }
@@ -744,7 +750,94 @@ class RestaurantStore extends ChangeNotifier {
       await _loadTablesAndActiveOrders();
       notifyListeners();
     } catch (e) {
-      lastError = e.toString();
+      lastError = _dioErrorMessage(e);
+      notifyListeners();
+    }
+  }
+
+  /// Remove one `order_items` row (or the merged line that maps to it).
+  Future<void> removeOrderItemLine(
+    String tableId,
+    String orderItemId,
+  ) async {
+    final oid = _activeOrderForTable(tableId);
+    if (oid == null || oid.isEmpty || orderItemId.isEmpty) {
+      return;
+    }
+    lastError = null;
+    try {
+      await _dio.patch(
+        '/api/cashier/orders/$oid/items',
+        data: {
+          'actions': [
+            {
+              'action': 'remove',
+              'order_item_id': orderItemId,
+            },
+          ],
+        },
+      );
+      await _fetchOrderDetail(oid);
+      await _loadTablesAndActiveOrders();
+      notifyListeners();
+    } catch (e) {
+      lastError = _dioErrorMessage(e);
+      notifyListeners();
+    }
+  }
+
+  /// Set line quantity. If [newQuantity] is 0 or negative, removes the line.
+  Future<void> setOrderItemQuantity(
+    String tableId,
+    String orderItemId,
+    int newQuantity,
+  ) async {
+    if (newQuantity <= 0) {
+      await removeOrderItemLine(tableId, orderItemId);
+      return;
+    }
+    final oid = _activeOrderForTable(tableId);
+    if (oid == null || oid.isEmpty || orderItemId.isEmpty) {
+      return;
+    }
+    lastError = null;
+    try {
+      await _dio.patch(
+        '/api/cashier/orders/$oid/items',
+        data: {
+          'actions': [
+            {
+              'action': 'update_quantity',
+              'order_item_id': orderItemId,
+              'quantity': newQuantity,
+            },
+          ],
+        },
+      );
+      await _fetchOrderDetail(oid);
+      await _loadTablesAndActiveOrders();
+      notifyListeners();
+    } catch (e) {
+      lastError = _dioErrorMessage(e);
+      notifyListeners();
+    }
+  }
+
+  /// Mark the table's active order as cancelled (frees the table for a new order).
+  Future<void> cancelActiveOrder(String tableId) async {
+    final oid = _activeOrderForTable(tableId);
+    if (oid == null || oid.isEmpty) {
+      return;
+    }
+    lastError = null;
+    try {
+      await _dio.patch('/api/cashier/orders/$oid/cancel');
+      _orderDetailById.remove(oid);
+      await _loadTablesAndActiveOrders();
+      _syncFloorToneWithTables();
+      notifyListeners();
+    } catch (e) {
+      lastError = _dioErrorMessage(e);
       notifyListeners();
     }
   }
