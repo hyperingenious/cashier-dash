@@ -1123,6 +1123,139 @@ class DashboardTopBar extends StatelessWidget {
   }
 }
 
+/// Segmented strip for Dine-in / Pick up / Delivery — reads as three obvious
+/// tappable regions (bordered track + raised selected segment).
+class _FloorModeTabStrip extends StatelessWidget {
+  const _FloorModeTabStrip({required this.controller});
+
+  final TabController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(DS.s16, DS.s10, DS.s16, DS.s10),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: DS.surfaceMuted,
+              borderRadius: BorderRadius.circular(DS.r8),
+              border: Border.all(color: DS.borderStrong),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(DS.s4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _ModeTabChip(
+                      label: 'Dine-in',
+                      icon: Icons.restaurant_outlined,
+                      selected: controller.index == 0,
+                      onTap: () => controller.animateTo(0),
+                    ),
+                  ),
+                  Expanded(
+                    child: _ModeTabChip(
+                      label: 'Pick up',
+                      icon: Icons.takeout_dining_outlined,
+                      selected: controller.index == 1,
+                      onTap: () => controller.animateTo(1),
+                    ),
+                  ),
+                  Expanded(
+                    child: _ModeTabChip(
+                      label: 'Delivery',
+                      icon: Icons.delivery_dining_outlined,
+                      selected: controller.index == 2,
+                      onTap: () => controller.animateTo(2),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ModeTabChip extends StatelessWidget {
+  const _ModeTabChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: DS.s2),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(DS.r6),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            padding: const EdgeInsets.symmetric(
+              vertical: DS.s10,
+              horizontal: DS.s6,
+            ),
+            decoration: BoxDecoration(
+              color: selected ? DS.surface : Colors.transparent,
+              borderRadius: BorderRadius.circular(DS.r6),
+              border: Border.all(
+                color: selected ? DS.borderStrong : Colors.transparent,
+              ),
+              boxShadow: selected
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x190E1116),
+                        blurRadius: 8,
+                        offset: Offset(0, 2),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  size: 17,
+                  color: selected ? DS.accent : DS.textMuted,
+                ),
+                const SizedBox(width: DS.s6),
+                Flexible(
+                  child: Text(
+                    label,
+                    style: selected
+                        ? DS.bodyStrong()
+                        : DS.body(color: DS.textMuted),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class RestaurantFloorTab extends StatefulWidget {
   const RestaurantFloorTab({
     required this.store,
@@ -1339,19 +1472,7 @@ class _RestaurantFloorTabState extends State<RestaurantFloorTab>
       children: [
         Material(
           color: DS.surface,
-          child: TabBar(
-            controller: _tabs,
-            labelStyle: DS.bodyStrong(),
-            unselectedLabelStyle: DS.body(color: DS.textMuted),
-            labelColor: DS.accent,
-            unselectedLabelColor: DS.textMuted,
-            indicatorColor: DS.accent,
-            tabs: const [
-              Tab(text: 'Dine-in'),
-              Tab(text: 'Pick up'),
-              Tab(text: 'Delivery'),
-            ],
-          ),
+          child: _FloorModeTabStrip(controller: _tabs),
         ),
         Expanded(
           child: TabBarView(
