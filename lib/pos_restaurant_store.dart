@@ -142,6 +142,14 @@ class RestaurantStore extends ChangeNotifier {
   final Map<String, Map<String, dynamic>> _orderDetailById = {};
   final Map<String, String?> _activeOrderIdByTableId = {};
 
+  /// Tables where the cashier ran Print on the bill dialog (cleared when order ends).
+  final Set<String> _billPrintedTableIds = {};
+
+  /// Brief green highlight after settle/payment (wall-clock expiry).
+  final Map<String, DateTime> _paidHighlightUntil = {};
+
+  static const Duration _paidHighlightDuration = Duration(seconds: 90);
+
   String? lastError;
 
   /// Removing catalog rows is reserved for the admin app; cashiers only add via API.
@@ -150,6 +158,51 @@ class RestaurantStore extends ChangeNotifier {
   void clearLastError() {
     lastError = null;
     notifyListeners();
+  }
+
+  void _prunePaidHighlights() {
+    final now = DateTime.now();
+    _paidHighlightUntil.removeWhere((_, until) => !until.isAfter(now));
+  }
+
+  /// Tile color for floor plan / legend.
+  TableFloorTone tableFloorToneFor(String tableId) {
+    _prunePaidHighlights();
+    final paidUntil = _paidHighlightUntil[tableId];
+    if (paidUntil != null && DateTime.now().isBefore(paidUntil)) {
+      return TableFloorTone.paid;
+    }
+    if (!hasActiveOrder(tableId)) {
+      return TableFloorTone.empty;
+    }
+    if (_billPrintedTableIds.contains(tableId)) {
+      return TableFloorTone.billPrinted;
+    }
+    return TableFloorTone.orderOpen;
+  }
+
+  void markBillPrinted(String tableId) {
+    if (!hasActiveOrder(tableId)) {
+      return;
+    }
+    _billPrintedTableIds.add(tableId);
+    notifyListeners();
+  }
+
+  void markTablePaidHighlight(String tableId) {
+    _billPrintedTableIds.remove(tableId);
+    _paidHighlightUntil[tableId] =
+        DateTime.now().add(_paidHighlightDuration);
+    notifyListeners();
+  }
+
+  void _syncFloorToneWithTables() {
+    for (final t in _tables) {
+      if (hasActiveOrder(t.id)) {
+        _paidHighlightUntil.remove(t.id);
+      }
+    }
+    _billPrintedTableIds.removeWhere((id) => !hasActiveOrder(id));
   }
 
   UnmodifiableListView<DiningTable> get tables =>
@@ -320,6 +373,7 @@ class RestaurantStore extends ChangeNotifier {
     await Future.wait(
       detailIds.map((id) => _fetchOrderDetail(id)),
     );
+    _syncFloorToneWithTables();
   }
 
   Future<void> _fetchOrderDetail(String orderId) async {
@@ -625,6 +679,7 @@ class RestaurantStore extends ChangeNotifier {
       final total = _dec(order['total_amount']);
       if (total <= 0) {
         await _dio.patch('/api/cashier/orders/$oid/complete');
+        markTablePaidHighlight(tableId);
         await refreshAll();
         return;
       }
@@ -644,6 +699,7 @@ class RestaurantStore extends ChangeNotifier {
         );
       }
       await _dio.patch('/api/cashier/orders/$oid/complete');
+      markTablePaidHighlight(tableId);
       await refreshAll();
     } catch (e) {
       lastError = e.toString();

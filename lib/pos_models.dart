@@ -1,5 +1,17 @@
 enum TableStatus { available, occupied }
 
+/// Cashier floor tile colors (see legend on floor plan).
+enum TableFloorTone {
+  /// No active order — grey.
+  empty,
+  /// Active order, bill not printed yet — amber.
+  orderOpen,
+  /// Bill/receipt printed — purple.
+  billPrinted,
+  /// Payment settled (recent highlight) — green.
+  paid,
+}
+
 extension TableStatusX on TableStatus {
   String get label {
     switch (this) {

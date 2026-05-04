@@ -31,6 +31,82 @@ class PosColors {
   static const Color border = Color(0xFFE2E8F0);
 }
 
+/// Background + status border for floor table tiles (see [_FloorPlanLegend]).
+(Color bg, Color border) floorToneStyle(TableFloorTone tone) {
+  return switch (tone) {
+    TableFloorTone.empty => (
+        const Color(0xFFF3F4F6),
+        const Color(0xFFD1D5DB),
+      ),
+    TableFloorTone.orderOpen => (
+        const Color(0xFFFFF9E6),
+        const Color(0xFFFBBF24),
+      ),
+    TableFloorTone.billPrinted => (
+        const Color(0xFFF3E8FF),
+        const Color(0xFFA855F7),
+      ),
+    TableFloorTone.paid => (
+        const Color(0xFFDCFCE7),
+        const Color(0xFF22C55E),
+      ),
+  };
+}
+
+class _FloorPlanLegend extends StatelessWidget {
+  const _FloorPlanLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: PosColors.surfaceHighlight.withOpacity(0.45),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: PosColors.border),
+      ),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 8,
+        children: [
+          _chip(TableFloorTone.empty, 'Empty'),
+          _chip(TableFloorTone.orderOpen, 'Order open'),
+          _chip(TableFloorTone.billPrinted, 'Bill printed'),
+          _chip(TableFloorTone.paid, 'Paid'),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(TableFloorTone tone, String label) {
+    final s = floorToneStyle(tone);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 14,
+          height: 14,
+          decoration: BoxDecoration(
+            color: s.$1,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: s.$2, width: 1.2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: GoogleFonts.outfit(
+            fontSize: 12,
+            color: PosColors.textMain,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class CashierDashApp extends StatefulWidget {
   const CashierDashApp({super.key});
 
@@ -597,6 +673,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         timestamp: DateTime.now(),
         lines: lines,
         totals: totals,
+        onBillPrinted: () => widget.store.markBillPrinted(table.id),
       ),
     );
   }
@@ -1165,6 +1242,7 @@ class RestaurantFloorTab extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  const _FloorPlanLegend(),
                   Align(
                     alignment: Alignment.centerLeft,
                     child: FilledButton.tonalIcon(
@@ -1378,9 +1456,11 @@ class _SectionTableTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final occupied = table.status == TableStatus.occupied;
-    final bg =
-        occupied ? const Color(0xFFFFF9E6) : const Color(0xFFF3F4F6);
-    final borderColor = selected ? PosColors.primary : PosColors.border;
+    final tone = store.tableFloorToneFor(table.id);
+    final st = floorToneStyle(tone);
+    final bg = st.$1;
+    final statusBorder = st.$2;
+    final borderColor = selected ? PosColors.primary : statusBorder;
 
     return Material(
       color: Colors.transparent,
@@ -1826,6 +1906,8 @@ class TableWorkbench extends StatelessWidget {
                               timestamp: DateTime.now(),
                               lines: lines,
                               totals: totals,
+                              onBillPrinted: () =>
+                                  store.markBillPrinted(selectedTable!.id),
                             ),
                           );
                         },
@@ -2192,6 +2274,8 @@ class BillingSection extends StatelessWidget {
                                       timestamp: DateTime.now(),
                                       lines: lines,
                                       totals: totals,
+                                      onBillPrinted: () =>
+                                          store.markBillPrinted(table.id),
                                     ),
                                   );
                                 },
@@ -2381,6 +2465,7 @@ class BillReceiptDialog extends StatelessWidget {
   final DateTime timestamp;
   final List<BillLine> lines;
   final BillTotals totals;
+  final VoidCallback? onBillPrinted;
 
   const BillReceiptDialog({
     super.key,
@@ -2389,6 +2474,7 @@ class BillReceiptDialog extends StatelessWidget {
     required this.timestamp,
     required this.lines,
     required this.totals,
+    this.onBillPrinted,
   });
 
   Future<void> _printBill() async {
@@ -2468,9 +2554,15 @@ class BillReceiptDialog extends StatelessWidget {
       ),
     );
 
-    await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => doc.save(),
-        name: 'Receipt_${tableName}_${timestamp.millisecondsSinceEpoch}');
+    try {
+      await Printing.layoutPdf(
+          onLayout: (PdfPageFormat format) async => doc.save(),
+          name:
+              'Receipt_${tableName}_${timestamp.millisecondsSinceEpoch}');
+      onBillPrinted?.call();
+    } catch (_) {
+      /* print cancelled or failed */
+    }
   }
 
   @override
@@ -2579,7 +2671,7 @@ class BillReceiptDialog extends StatelessWidget {
                     child: SizedBox(
                       height: 48,
                       child: OutlinedButton.icon(
-                        onPressed: _printBill,
+                        onPressed: () async => _printBill(),
                         icon: const Icon(Icons.print_rounded, size: 20),
                         label: Text('Print', style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
                         style: OutlinedButton.styleFrom(
