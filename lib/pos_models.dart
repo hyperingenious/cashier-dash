@@ -24,6 +24,26 @@ extension TableStatusX on TableStatus {
 }
 
 /// A named area on the floor (e.g. Family, Garden) — from `floor_sections`.
+/// One row from GET /orders for pickup or delivery queues (no table).
+class OffPremOrderRow {
+  const OffPremOrderRow({
+    required this.id,
+    required this.total,
+    required this.status,
+    required this.source,
+    this.createdAt,
+  });
+
+  final String id;
+  final double total;
+  final String status;
+  final String source;
+  final DateTime? createdAt;
+
+  String get shortId =>
+      id.length >= 8 ? id.substring(0, 8) : id;
+}
+
 class FloorSection {
   const FloorSection({
     required this.id,

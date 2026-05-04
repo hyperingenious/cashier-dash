@@ -139,11 +139,19 @@ class RestaurantStore extends ChangeNotifier {
   final List<FloorSection> _sections = [];
   final List<MenuItem> _menuItems = [];
   final List<TransactionRecord> _transactions = [];
+  final List<OffPremOrderRow> _pickupQueue = [];
+  final List<OffPremOrderRow> _deliveryQueue = [];
   final Map<String, Map<String, dynamic>> _orderDetailById = {};
   final Map<String, String?> _activeOrderIdByTableId = {};
 
   /// Tables where the cashier ran Print on the bill dialog (cleared when order ends).
   final Set<String> _billPrintedTableIds = {};
+
+  /// Pickup / delivery orders: bill printed (no physical table).
+  final Set<String> _billPrintedOrderIds = {};
+
+  /// Brief green highlight after settle for off-prem orders.
+  final Map<String, DateTime> _paidHighlightOrderUntil = {};
 
   /// Brief green highlight after settle/payment (wall-clock expiry).
   final Map<String, DateTime> _paidHighlightUntil = {};
@@ -214,6 +222,12 @@ class RestaurantStore extends ChangeNotifier {
   UnmodifiableListView<TransactionRecord> get transactions =>
       UnmodifiableListView(_transactions);
 
+  UnmodifiableListView<OffPremOrderRow> get pickupQueue =>
+      UnmodifiableListView(_pickupQueue);
+
+  UnmodifiableListView<OffPremOrderRow> get deliveryQueue =>
+      UnmodifiableListView(_deliveryQueue);
+
   Future<void> refreshAll() async {
     lastError = null;
     final errs = <String>[];
@@ -236,6 +250,11 @@ class RestaurantStore extends ChangeNotifier {
       await _loadCompletedTransactions();
     } catch (e) {
       errs.add('History: ${_dioErrorMessage(e)}');
+    }
+    try {
+      await refreshOffPremQueues();
+    } catch (e) {
+      errs.add('Pickup/Delivery: ${_dioErrorMessage(e)}');
     }
     if (errs.isNotEmpty) {
       lastError = errs.join('\n');
@@ -391,6 +410,14 @@ class RestaurantStore extends ChangeNotifier {
     } catch (_) {
       _orderDetailById.remove(orderId);
     }
+  }
+
+  Future<void> ensureOrderLoaded(String orderId) async {
+    if (orderId.isEmpty) {
+      return;
+    }
+    await _fetchOrderDetail(orderId);
+    notifyListeners();
   }
 
   Future<void> _loadCompletedTransactions() async {
@@ -599,12 +626,11 @@ class RestaurantStore extends ChangeNotifier {
     return oid != null && oid.isNotEmpty;
   }
 
-  List<BillLine> orderDetailsForTable(String tableId) {
-    final oid = _activeOrderForTable(tableId);
-    if (oid == null || oid.isEmpty) {
+  List<BillLine> _linesForOrderId(String? orderId) {
+    if (orderId == null || orderId.isEmpty) {
       return const [];
     }
-    final d = _orderDetailById[oid];
+    final d = _orderDetailById[orderId];
     final rawItems = d?['items'] as List<dynamic>? ?? const [];
     final items = _mergeRawOrderItems(rawItems);
     final out = <BillLine>[];
@@ -630,6 +656,15 @@ class RestaurantStore extends ChangeNotifier {
     return out;
   }
 
+  List<BillLine> orderDetailsForTable(String tableId) {
+    final oid = _activeOrderForTable(tableId);
+    return _linesForOrderId(oid);
+  }
+
+  List<BillLine> orderDetailsForOrderId(String orderId) {
+    return _linesForOrderId(orderId);
+  }
+
   BillTotals calculateBill(String tableId) {
     final oid = _activeOrderForTable(tableId);
     final lines = orderDetailsForTable(tableId);
@@ -644,6 +679,296 @@ class RestaurantStore extends ChangeNotifier {
       tax: tax,
       total: total > 0 ? total : (subtotal - discount).clamp(0, double.infinity),
     );
+  }
+
+  BillTotals calculateBillForOrderId(String orderId) {
+    final lines = _linesForOrderId(orderId);
+    final subtotal = lines.fold<double>(0, (a, b) => a + b.lineTotal);
+    final d = _orderDetailById[orderId];
+    final order = d?['order'] as Map<String, dynamic>?;
+    final total = order != null ? _dec(order['total_amount']) : subtotal;
+    final discount = order != null ? _dec(order['discount']) : 0.0;
+    const tax = 0.0;
+    return BillTotals(
+      subtotal: subtotal,
+      tax: tax,
+      total: total > 0 ? total : (subtotal - discount).clamp(0, double.infinity),
+    );
+  }
+
+  String? _orderStatusFromDetail(String orderId) {
+    final d = _orderDetailById[orderId];
+    final o = d?['order'] as Map<String, dynamic>?;
+    return o?['status']?.toString();
+  }
+
+  bool _isActiveOrderStatus(String? s) {
+    if (s == null || s.isEmpty) {
+      return false;
+    }
+    return const {
+      'pending',
+      'accepted',
+      'preparing',
+      'ready',
+      'served',
+    }.contains(s);
+  }
+
+  void _prunePaidOrderHighlights() {
+    final now = DateTime.now();
+    _paidHighlightOrderUntil
+        .removeWhere((_, until) => !until.isAfter(now));
+  }
+
+  /// Floor-style tone for pickup/delivery queue tiles (legend matches).
+  TableFloorTone channelOrderToneFor(String orderId) {
+    _prunePaidOrderHighlights();
+    final paidUntil = _paidHighlightOrderUntil[orderId];
+    if (paidUntil != null && DateTime.now().isBefore(paidUntil)) {
+      return TableFloorTone.paid;
+    }
+    final st = _orderStatusFromDetail(orderId);
+    if (!_isActiveOrderStatus(st)) {
+      return TableFloorTone.empty;
+    }
+    if (_billPrintedOrderIds.contains(orderId)) {
+      return TableFloorTone.billPrinted;
+    }
+    return TableFloorTone.orderOpen;
+  }
+
+  void markBillPrintedForOrder(String orderId) {
+    if (!_isActiveOrderStatus(_orderStatusFromDetail(orderId))) {
+      return;
+    }
+    _billPrintedOrderIds.add(orderId);
+    notifyListeners();
+  }
+
+  void _markChannelOrderPaidHighlight(String orderId) {
+    _billPrintedOrderIds.remove(orderId);
+    _paidHighlightOrderUntil[orderId] =
+        DateTime.now().add(_paidHighlightDuration);
+    notifyListeners();
+  }
+
+  Future<void> refreshOffPremQueues() async {
+    _pickupQueue.clear();
+    _deliveryQueue.clear();
+    for (final ch in const ['pickup', 'delivery']) {
+      try {
+        final res = await _dio.get<List<dynamic>>(
+          '/api/cashier/orders',
+          queryParameters: <String, dynamic>{
+            'source': ch,
+            'active': true,
+          },
+        );
+        final list = res.data ?? const [];
+        final rows = <OffPremOrderRow>[];
+        for (final raw in list) {
+          if (raw is! Map) {
+            continue;
+          }
+          final m = Map<String, dynamic>.from(raw);
+          final id = (m['id'] ?? '').toString();
+          if (id.isEmpty) {
+            continue;
+          }
+          rows.add(
+            OffPremOrderRow(
+              id: id,
+              total: _dec(m['total_amount']),
+              status: (m['status'] ?? '').toString(),
+              source: (m['source'] ?? ch).toString(),
+              createdAt: DateTime.tryParse((m['created_at'] ?? '').toString()),
+            ),
+          );
+        }
+        if (ch == 'pickup') {
+          _pickupQueue.addAll(rows);
+        } else {
+          _deliveryQueue.addAll(rows);
+        }
+      } catch (_) {
+        // leave queue empty; lastError set elsewhere if needed
+      }
+    }
+    _syncChannelBillPrinted();
+    notifyListeners();
+  }
+
+  void _syncChannelBillPrinted() {
+    final activeIds = <String>{
+      ..._pickupQueue.map((e) => e.id),
+      ..._deliveryQueue.map((e) => e.id),
+    };
+    _billPrintedOrderIds.removeWhere((id) => !activeIds.contains(id));
+  }
+
+  Future<String?> createOffPremOrder(String channel) async {
+    final c = channel.toLowerCase();
+    if (c != 'pickup' && c != 'delivery') {
+      return null;
+    }
+    lastError = null;
+    try {
+      final res = await _dio.post<Map<String, dynamic>>(
+        '/api/cashier/orders',
+        data: <String, dynamic>{'channel': c},
+      );
+      final id = res.data?['id']?.toString();
+      if (id != null && id.isNotEmpty) {
+        await _fetchOrderDetail(id);
+        await refreshOffPremQueues();
+        notifyListeners();
+        return id;
+      }
+    } catch (e) {
+      lastError = _dioErrorMessage(e);
+      notifyListeners();
+    }
+    return null;
+  }
+
+  Future<void> addItemToOrderId({
+    required String orderId,
+    required String menuItemId,
+    required int quantity,
+  }) async {
+    if (quantity <= 0 || orderId.isEmpty) {
+      return;
+    }
+    lastError = null;
+    try {
+      await _dio.patch(
+        '/api/cashier/orders/$orderId/items',
+        data: {
+          'actions': [
+            {
+              'action': 'add',
+              'menu_item_id': menuItemId,
+              'quantity': quantity,
+            },
+          ],
+        },
+      );
+      await _fetchOrderDetail(orderId);
+      await refreshOffPremQueues();
+      notifyListeners();
+    } catch (e) {
+      lastError = _dioErrorMessage(e);
+      notifyListeners();
+    }
+  }
+
+  Future<void> removeOrderItemLineForOrderId(
+    String orderId,
+    String orderItemId,
+  ) async {
+    if (orderId.isEmpty || orderItemId.isEmpty) {
+      return;
+    }
+    lastError = null;
+    try {
+      await _dio.patch(
+        '/api/cashier/orders/$orderId/items',
+        data: {
+          'actions': [
+            {
+              'action': 'remove',
+              'order_item_id': orderItemId,
+            },
+          ],
+        },
+      );
+      await _fetchOrderDetail(orderId);
+      await refreshOffPremQueues();
+      notifyListeners();
+    } catch (e) {
+      lastError = _dioErrorMessage(e);
+      notifyListeners();
+    }
+  }
+
+  Future<void> setOrderItemQuantityForOrderId(
+    String orderId,
+    String orderItemId,
+    int newQuantity,
+  ) async {
+    if (newQuantity <= 0) {
+      await removeOrderItemLineForOrderId(orderId, orderItemId);
+      return;
+    }
+    if (orderId.isEmpty || orderItemId.isEmpty) {
+      return;
+    }
+    lastError = null;
+    try {
+      await _dio.patch(
+        '/api/cashier/orders/$orderId/items',
+        data: {
+          'actions': [
+            {
+              'action': 'update_quantity',
+              'order_item_id': orderItemId,
+              'quantity': newQuantity,
+            },
+          ],
+        },
+      );
+      await _fetchOrderDetail(orderId);
+      await refreshOffPremQueues();
+      notifyListeners();
+    } catch (e) {
+      lastError = _dioErrorMessage(e);
+      notifyListeners();
+    }
+  }
+
+  Future<void> settleOrderById(String orderId) async {
+    if (orderId.isEmpty) {
+      return;
+    }
+    final lines = _linesForOrderId(orderId);
+    if (lines.isEmpty) {
+      await refreshOffPremQueues();
+      return;
+    }
+    try {
+      await _fetchOrderDetail(orderId);
+      final d = _orderDetailById[orderId];
+      final order = d?['order'] as Map<String, dynamic>? ?? {};
+      final total = _dec(order['total_amount']);
+      if (total <= 0) {
+        await _dio.patch('/api/cashier/orders/$orderId/complete');
+        _markChannelOrderPaidHighlight(orderId);
+        await refreshAll();
+        return;
+      }
+      final pay = await _dio.post<Map<String, dynamic>>(
+        '/api/cashier/payments',
+        data: {
+          'order_id': orderId,
+          'amount': total,
+          'method': 'cash',
+        },
+      );
+      final pid = pay.data?['id']?.toString();
+      if (pid != null && pid.isNotEmpty) {
+        await _dio.patch(
+          '/api/cashier/payments/$pid',
+          data: {'status': 'paid'},
+        );
+      }
+      await _dio.patch('/api/cashier/orders/$orderId/complete');
+      _markChannelOrderPaidHighlight(orderId);
+      await refreshAll();
+    } catch (e) {
+      lastError = _dioErrorMessage(e);
+      notifyListeners();
+    }
   }
 
   Future<void> markTableOccupied(String tableId) async {
@@ -827,22 +1152,32 @@ class RestaurantStore extends ChangeNotifier {
     }
   }
 
-  /// Mark the table's active order as cancelled (frees the table for a new order).
-  Future<void> cancelActiveOrder(String tableId) async {
-    final oid = _activeOrderForTable(tableId);
-    if (oid == null || oid.isEmpty) {
+  Future<void> cancelOrderById(String orderId) async {
+    if (orderId.isEmpty) {
       return;
     }
     lastError = null;
     try {
-      await _dio.patch('/api/cashier/orders/$oid/cancel');
-      _orderDetailById.remove(oid);
+      await _dio.patch('/api/cashier/orders/$orderId/cancel');
+      _orderDetailById.remove(orderId);
+      _billPrintedOrderIds.remove(orderId);
+      _paidHighlightOrderUntil.remove(orderId);
       await _loadTablesAndActiveOrders();
+      await refreshOffPremQueues();
       _syncFloorToneWithTables();
       notifyListeners();
     } catch (e) {
       lastError = _dioErrorMessage(e);
       notifyListeners();
     }
+  }
+
+  /// Mark the table's active order as cancelled (frees the table for a new order).
+  Future<void> cancelActiveOrder(String tableId) async {
+    final oid = _activeOrderForTable(tableId);
+    if (oid == null || oid.isEmpty) {
+      return;
+    }
+    await cancelOrderById(oid);
   }
 }

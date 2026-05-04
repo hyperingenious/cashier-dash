@@ -423,7 +423,7 @@ extension PosSectionX on PosSection {
   String get subtitle {
     switch (this) {
       case PosSection.floor:
-        return 'Manage dining tables, occupancy, and live orders.';
+        return 'Dine-in floor, pick up queue, and delivery queue.';
       case PosSection.menu:
         return 'Maintain item catalog used by cashiers and KOT.';
       case PosSection.billing:
@@ -1121,7 +1121,7 @@ class DashboardTopBar extends StatelessWidget {
   }
 }
 
-class RestaurantFloorTab extends StatelessWidget {
+class RestaurantFloorTab extends StatefulWidget {
   const RestaurantFloorTab({
     required this.store,
     required this.selectedTableId,
@@ -1152,7 +1152,28 @@ class RestaurantFloorTab extends StatelessWidget {
   final VoidCallback onDeleteTable;
 
   @override
-  Widget build(BuildContext context) {
+  State<RestaurantFloorTab> createState() => _RestaurantFloorTabState();
+}
+
+class _RestaurantFloorTabState extends State<RestaurantFloorTab>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabs;
+  String? _pickOrderId;
+  String? _delOrderId;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    super.dispose();
+  }
+
+  Widget _dineInBody() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1185,16 +1206,17 @@ class RestaurantFloorTab extends StatelessWidget {
                         Align(
                           alignment: Alignment.centerLeft,
                           child: OutlinedButton.icon(
-                            onPressed: onAddSection,
+                            onPressed: widget.onAddSection,
                             icon: const Icon(Icons.add, size: 16),
                             label: const Text('New section'),
                           ),
                         ),
                         const SizedBox(height: DS.s16),
-                        if (store.sections.isEmpty)
+                        if (widget.store.sections.isEmpty)
                           Padding(
-                            padding:
-                                const EdgeInsets.symmetric(vertical: DS.s24),
+                            padding: const EdgeInsets.symmetric(
+                              vertical: DS.s24,
+                            ),
                             child: Center(
                               child: Text(
                                 'Create a section first, then add tables under it.',
@@ -1203,34 +1225,37 @@ class RestaurantFloorTab extends StatelessWidget {
                               ),
                             ),
                           ),
-                        ...store.sections.map(
+                        ...widget.store.sections.map(
                           (sec) => Padding(
                             padding: const EdgeInsets.only(bottom: 20),
                             child: _FloorSectionBlock(
                               section: sec,
-                              store: store,
-                              selectedTableId: selectedTableId,
-                              onSelectTable: onSelectTable,
-                              onAddTable: () => onAddTableInSection(sec.id),
-                              onDeleteSection: () => onDeleteSection(sec),
-                              onBillPreview: onBillPreview,
+                              store: widget.store,
+                              selectedTableId: widget.selectedTableId,
+                              onSelectTable: widget.onSelectTable,
+                              onAddTable: () =>
+                                  widget.onAddTableInSection(sec.id),
+                              onDeleteSection: () =>
+                                  widget.onDeleteSection(sec),
+                              onBillPreview: widget.onBillPreview,
                             ),
                           ),
                         ),
-                        if (store.tablesWithoutSection.isNotEmpty) ...[
+                        if (widget.store.tablesWithoutSection.isNotEmpty) ...[
                           Text('OTHER TABLES', style: DS.eyebrow()),
                           const SizedBox(height: DS.s8),
                           Wrap(
                             spacing: 10,
                             runSpacing: 10,
                             children: [
-                              for (final t in store.tablesWithoutSection)
+                              for (final t in widget.store.tablesWithoutSection)
                                 _SectionTableTile(
                                   table: t,
-                                  selected: t.id == selectedTableId,
-                                  store: store,
-                                  onTap: () => onSelectTable(t),
-                                  onBillPreview: () => onBillPreview(t),
+                                  selected: t.id == widget.selectedTableId,
+                                  store: widget.store,
+                                  onTap: () => widget.onSelectTable(t),
+                                  onBillPreview: () =>
+                                      widget.onBillPreview(t),
                                 ),
                             ],
                           ),
@@ -1247,18 +1272,233 @@ class RestaurantFloorTab extends StatelessWidget {
         SizedBox(
           width: 340,
           child: TableWorkbench(
-            store: store,
-            selectedTable: selectedTableId != null
-                ? store.tableById(selectedTableId!)
+            store: widget.store,
+            selectedTable: widget.selectedTableId != null
+                ? widget.store.tableById(widget.selectedTableId!)
                 : null,
-            onAddOrder: onAddOrder,
-            onQuickAddItem: onQuickAddItem,
-            onSettle: onSettle,
-            onMarkOccupied: onMarkOccupied,
-            onDeleteTable: onDeleteTable,
+            onAddOrder: widget.onAddOrder,
+            onQuickAddItem: widget.onQuickAddItem,
+            onSettle: widget.onSettle,
+            onMarkOccupied: widget.onMarkOccupied,
+            onDeleteTable: widget.onDeleteTable,
           ),
         ),
       ],
+    );
+  }
+
+  Widget _channelBody(
+    String channel,
+    String? selectedId,
+    void Function(String) setSel,
+    VoidCallback clearSel,
+  ) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: _ChannelQueuePanel(
+            store: widget.store,
+            channel: channel,
+            selectedOrderId: selectedId,
+            onSelectOrder: (id) async {
+              await widget.store.ensureOrderLoaded(id);
+              setSel(id);
+            },
+            onCreateTicket: () async {
+              final id = await widget.store.createOffPremOrder(channel);
+              if (id != null && mounted) {
+                setSel(id);
+              }
+            },
+          ),
+        ),
+        const SizedBox(width: 12),
+        SizedBox(
+          width: 340,
+          child: OffPremOrderWorkbench(
+            store: widget.store,
+            channelTitle: channel == 'pickup' ? 'Pick up' : 'Delivery',
+            selectedOrderId: selectedId,
+            onOrderUpdated: () {
+              if (mounted) setState(() {});
+            },
+            onClearSelection: clearSel,
+          ),
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: DS.surface,
+          child: TabBar(
+            controller: _tabs,
+            labelStyle: DS.bodyStrong(),
+            unselectedLabelStyle: DS.body(color: DS.textMuted),
+            labelColor: DS.accent,
+            unselectedLabelColor: DS.textMuted,
+            indicatorColor: DS.accent,
+            tabs: const [
+              Tab(text: 'Dine-in'),
+              Tab(text: 'Pick up'),
+              Tab(text: 'Delivery'),
+            ],
+          ),
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabs,
+            children: [
+              _dineInBody(),
+              _channelBody(
+                'pickup',
+                _pickOrderId,
+                (id) => setState(() => _pickOrderId = id),
+                () => setState(() => _pickOrderId = null),
+              ),
+              _channelBody(
+                'delivery',
+                _delOrderId,
+                (id) => setState(() => _delOrderId = id),
+                () => setState(() => _delOrderId = null),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Left column: active pickup or delivery tickets (no floor plan).
+class _ChannelQueuePanel extends StatelessWidget {
+  const _ChannelQueuePanel({
+    required this.store,
+    required this.channel,
+    required this.selectedOrderId,
+    required this.onSelectOrder,
+    required this.onCreateTicket,
+  });
+
+  final RestaurantStore store;
+  final String channel;
+  final String? selectedOrderId;
+  final Future<void> Function(String id) onSelectOrder;
+  final VoidCallback onCreateTicket;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = channel == 'pickup' ? 'Pick up' : 'Delivery';
+    return ColoredBox(
+      color: DS.bg,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(DS.s16, DS.s12, DS.s16, DS.s8),
+            child: Row(
+              children: [
+                Text('$label · QUEUE', style: DS.eyebrow()),
+                const Spacer(),
+                OutlinedButton.icon(
+                  onPressed: onCreateTicket,
+                  icon: const Icon(Icons.add, size: 16),
+                  label: Text('New $label'),
+                ),
+              ],
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: DS.s16),
+            child: _FloorPlanLegend(),
+          ),
+          const SizedBox(height: DS.s8),
+          Expanded(
+            child: AnimatedBuilder(
+              animation: store,
+              builder: (context, _) {
+                final q = channel == 'pickup'
+                    ? store.pickupQueue
+                    : store.deliveryQueue;
+                if (q.isEmpty) {
+                  return Center(
+                    child: Text(
+                      'No active $label orders.\nTap “New $label” to open a ticket.',
+                      textAlign: TextAlign.center,
+                      style: DS.body(color: DS.textMuted),
+                    ),
+                  );
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(
+                    DS.s16,
+                    0,
+                    DS.s16,
+                    DS.s24,
+                  ),
+                  itemCount: q.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: DS.s8),
+                  itemBuilder: (context, i) {
+                    final row = q[i];
+                    final sel = row.id == selectedOrderId;
+                    final tone = store.channelOrderToneFor(row.id);
+                    final st = floorToneStyle(tone);
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => onSelectOrder(row.id),
+                        borderRadius: BorderRadius.circular(DS.r6),
+                        child: Container(
+                          padding: const EdgeInsets.all(DS.s10),
+                          decoration: BoxDecoration(
+                            color: DS.surface,
+                            borderRadius: BorderRadius.circular(DS.r6),
+                            border: Border.all(
+                              color: sel ? DS.accent : DS.border,
+                              width: sel ? 1.4 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 4,
+                                height: 44,
+                                decoration: BoxDecoration(
+                                  color: st.border,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                              const SizedBox(width: DS.s10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('#${row.shortId}', style: DS.bodyStrong()),
+                                    Text(
+                                      '₹${row.total.toStringAsFixed(2)} · ${row.status}',
+                                      style: DS.caption(),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1983,6 +2223,442 @@ class TableWorkbench extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Right panel for pick up / delivery tickets (mirrors [TableWorkbench] without tables).
+class OffPremOrderWorkbench extends StatelessWidget {
+  const OffPremOrderWorkbench({
+    required this.store,
+    required this.channelTitle,
+    required this.selectedOrderId,
+    required this.onOrderUpdated,
+    required this.onClearSelection,
+    super.key,
+  });
+
+  final RestaurantStore store;
+  final String channelTitle;
+  final String? selectedOrderId;
+  final VoidCallback onOrderUpdated;
+  final VoidCallback onClearSelection;
+
+  Future<void> _confirmCancelOrder(BuildContext context, String orderId) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel order'),
+        content: const Text('Void this ticket and remove all lines?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: PosColors.error),
+            child: const Text('Cancel order'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && context.mounted) {
+      await store.cancelOrderById(orderId);
+      onClearSelection();
+      onOrderUpdated();
+    }
+  }
+
+  Future<void> _openAddDialog(BuildContext context, String orderId) async {
+    if (store.menuItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No menu items yet. Add them from the Menu tab.'),
+        ),
+      );
+      return;
+    }
+    final draft = await showDialog<OrderDraft>(
+      context: context,
+      builder: (_) => AddOrderDialog(menuItems: store.menuItems.toList()),
+    );
+    if (!context.mounted || draft == null) return;
+    await store.addItemToOrderId(
+      orderId: orderId,
+      menuItemId: draft.menuItemId,
+      quantity: draft.quantity,
+    );
+    onOrderUpdated();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final oid = selectedOrderId;
+    return AnimatedBuilder(
+      animation: store,
+      builder: (context, _) {
+        if (oid == null || oid.isEmpty) {
+          return GlassContainer(
+            child: Center(
+              child: Text(
+                'Select a ticket\nor create one from the queue',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  color: PosColors.textMuted,
+                  fontSize: 14,
+                ),
+              ),
+            ),
+          );
+        }
+
+        final lines = store.orderDetailsForOrderId(oid);
+        final totals = store.calculateBillForOrderId(oid);
+        final headerLabel =
+            '$channelTitle · #${oid.length >= 8 ? oid.substring(0, 8) : oid}';
+
+        return GlassContainer(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: PosColors.border)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.local_shipping_outlined,
+                        color: PosColors.warning, size: 22),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        headerLabel,
+                        style: GoogleFonts.inter(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: PosColors.textMain,
+                        ),
+                      ),
+                    ),
+                    PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert,
+                          color: PosColors.textMuted, size: 20),
+                      color: PosColors.surfaceHighlight,
+                      onSelected: (value) {
+                        if (value == 'cancel') {
+                          _confirmCancelOrder(context, oid);
+                        }
+                        if (value == 'paid') {
+                          store.settleOrderById(oid).then((_) {
+                            onClearSelection();
+                            onOrderUpdated();
+                          });
+                        }
+                      },
+                      itemBuilder: (ctx) => [
+                        if (lines.isNotEmpty)
+                          PopupMenuItem(
+                            value: 'paid',
+                            child: Row(
+                              children: [
+                                Icon(Icons.payments_outlined,
+                                    color: PosColors.accent, size: 18),
+                                const SizedBox(width: 10),
+                                Text('Mark paid',
+                                    style: GoogleFonts.inter(fontSize: 13)),
+                              ],
+                            ),
+                          ),
+                        PopupMenuItem(
+                          value: 'cancel',
+                          child: Row(
+                            children: [
+                              Icon(Icons.cancel_outlined,
+                                  color: PosColors.error, size: 18),
+                              const SizedBox(width: 10),
+                              Text('Cancel order',
+                                  style: GoogleFonts.inter(
+                                      fontSize: 13,
+                                      color: PosColors.error)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: lines.isEmpty
+                    ? Center(
+                        child: Text(
+                          'Add items to this ticket',
+                          style: GoogleFonts.inter(
+                              color: PosColors.textMuted, fontSize: 14),
+                        ),
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: lines.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 10),
+                        itemBuilder: (context, index) {
+                          final line = lines[index];
+                          final itemOid = line.orderItemId;
+                          final mid = line.menuItemId;
+                          final canChQty =
+                              itemOid != null && itemOid.isNotEmpty;
+                          final canAddUnit =
+                              mid != null && mid.isNotEmpty;
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              IconAction(
+                                icon: Icons.remove,
+                                tooltip: 'Decrease quantity',
+                                onTap: !canChQty
+                                    ? () {}
+                                    : () => store
+                                        .setOrderItemQuantityForOrderId(
+                                          oid,
+                                          itemOid,
+                                          line.quantity - 1,
+                                        )
+                                        .then((_) => onOrderUpdated()),
+                              ),
+                              IconAction(
+                                icon: Icons.add,
+                                tooltip: 'Increase quantity',
+                                onTap: !canAddUnit
+                                    ? () {}
+                                    : () => store
+                                        .addItemToOrderId(
+                                          orderId: oid,
+                                          menuItemId: mid,
+                                          quantity: 1,
+                                        )
+                                        .then((_) => onOrderUpdated()),
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8),
+                                  child: Text(
+                                    '${line.quantity}× ${line.itemName}',
+                                    style: GoogleFonts.inter(
+                                      color: PosColors.textMain,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                              Text(
+                                line.lineTotalFormatted,
+                                style: GoogleFonts.inter(
+                                  color: PosColors.textMain,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              IconAction(
+                                icon: Icons.close,
+                                tooltip: 'Remove line',
+                                danger: true,
+                                onTap: !canChQty
+                                    ? () {}
+                                    : () => store
+                                        .removeOrderItemLineForOrderId(
+                                            oid, itemOid)
+                                        .then((_) => onOrderUpdated()),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+              ),
+              if (store.menuItems.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Quick Add',
+                        style: GoogleFonts.inter(
+                          color: PosColors.textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: store.menuItems.map((item) {
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 8),
+                              child: InkWell(
+                                onTap: () => store
+                                    .addItemToOrderId(
+                                      orderId: oid,
+                                      menuItemId: item.id,
+                                      quantity: 1,
+                                    )
+                                    .then((_) => onOrderUpdated()),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: PosColors.surfaceHighlight
+                                        .withOpacity(0.5),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: PosColors.border
+                                            .withOpacity(0.5)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Text(
+                                        item.name,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13,
+                                          color: PosColors.textMain,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        item.formattedPrice,
+                                        style: GoogleFonts.inter(
+                                          color: PosColors.accent,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: PosColors.surfaceHighlight.withOpacity(0.3),
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
+                  ),
+                  border: const Border(top: BorderSide(color: PosColors.border)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _SummaryRow(
+                        label: 'Subtotal', value: totals.subtotalFormatted),
+                    const SizedBox(height: 8),
+                    _SummaryRow(label: 'Tax (10%)', value: totals.taxFormatted),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Divider(color: PosColors.border),
+                    ),
+                    _SummaryRow(
+                      label: 'Total',
+                      value: totals.totalFormatted,
+                      isTotal: true,
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openAddDialog(context, oid),
+                            icon: const Icon(Icons.add, size: 14),
+                            label: const Text('Add',
+                                style: TextStyle(fontSize: 11)),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: lines.isEmpty
+                                ? null
+                                : () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (_) => BillReceiptDialog(
+                                        title: 'ORDER SUMMARY',
+                                        tableName: headerLabel,
+                                        timestamp: DateTime.now(),
+                                        lines: lines,
+                                        totals: totals,
+                                        onBillPrinted: () => store
+                                            .markBillPrintedForOrder(oid),
+                                      ),
+                                    );
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: PosColors.primary,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            icon: const Icon(Icons.receipt_long, size: 14),
+                            label: const Text('Bill',
+                                style: TextStyle(fontSize: 11)),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Tooltip(
+                            message:
+                                'Record full payment as cash and close the order',
+                            child: ElevatedButton.icon(
+                              onPressed: lines.isEmpty
+                                  ? null
+                                  : () {
+                                      store.settleOrderById(oid).then((_) {
+                                        onClearSelection();
+                                        onOrderUpdated();
+                                      });
+                                    },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: PosColors.accent,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 12),
+                                disabledBackgroundColor: PosColors
+                                    .surfaceHighlight
+                                    .withOpacity(0.5),
+                              ),
+                              icon: const Icon(Icons.payments_outlined,
+                                  size: 14),
+                              label: const Text('Mark paid',
+                                  style: TextStyle(fontSize: 11)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
