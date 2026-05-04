@@ -1159,71 +1159,87 @@ class RestaurantFloorTab extends StatelessWidget {
         Expanded(
           child: ColoredBox(
             color: DS.bg,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(
-                DS.s16,
-                DS.s12,
-                DS.s16,
-                DS.s24,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const _FloorPlanLegend(),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: OutlinedButton.icon(
-                      onPressed: onAddSection,
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('New section'),
-                    ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    DS.s16,
+                    DS.s12,
+                    DS.s16,
+                    0,
                   ),
-                  const SizedBox(height: DS.s16),
-                  if (store.sections.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: DS.s24),
-                      child: Center(
-                        child: Text(
-                          'Create a section first, then add tables under it.',
-                          textAlign: TextAlign.center,
-                          style: DS.body(color: DS.textMuted),
-                        ),
-                      ),
+                  child: const _FloorPlanLegend(),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(
+                      DS.s16,
+                      DS.s12,
+                      DS.s16,
+                      DS.s24,
                     ),
-                  ...store.sections.map(
-                    (sec) => Padding(
-                      padding: const EdgeInsets.only(bottom: 20),
-                      child: _FloorSectionBlock(
-                        section: sec,
-                        store: store,
-                        selectedTableId: selectedTableId,
-                        onSelectTable: onSelectTable,
-                        onAddTable: () => onAddTableInSection(sec.id),
-                        onDeleteSection: () => onDeleteSection(sec),
-                        onBillPreview: onBillPreview,
-                      ),
-                    ),
-                  ),
-                  if (store.tablesWithoutSection.isNotEmpty) ...[
-                    Text('OTHER TABLES', style: DS.eyebrow()),
-                    const SizedBox(height: DS.s8),
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        for (final t in store.tablesWithoutSection)
-                          _SectionTableTile(
-                            table: t,
-                            selected: t.id == selectedTableId,
-                            store: store,
-                            onTap: () => onSelectTable(t),
-                            onBillPreview: () => onBillPreview(t),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton.icon(
+                            onPressed: onAddSection,
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('New section'),
                           ),
+                        ),
+                        const SizedBox(height: DS.s16),
+                        if (store.sections.isEmpty)
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: DS.s24),
+                            child: Center(
+                              child: Text(
+                                'Create a section first, then add tables under it.',
+                                textAlign: TextAlign.center,
+                                style: DS.body(color: DS.textMuted),
+                              ),
+                            ),
+                          ),
+                        ...store.sections.map(
+                          (sec) => Padding(
+                            padding: const EdgeInsets.only(bottom: 20),
+                            child: _FloorSectionBlock(
+                              section: sec,
+                              store: store,
+                              selectedTableId: selectedTableId,
+                              onSelectTable: onSelectTable,
+                              onAddTable: () => onAddTableInSection(sec.id),
+                              onDeleteSection: () => onDeleteSection(sec),
+                              onBillPreview: onBillPreview,
+                            ),
+                          ),
+                        ),
+                        if (store.tablesWithoutSection.isNotEmpty) ...[
+                          Text('OTHER TABLES', style: DS.eyebrow()),
+                          const SizedBox(height: DS.s8),
+                          Wrap(
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              for (final t in store.tablesWithoutSection)
+                                _SectionTableTile(
+                                  table: t,
+                                  selected: t.id == selectedTableId,
+                                  store: store,
+                                  onTap: () => onSelectTable(t),
+                                  onBillPreview: () => onBillPreview(t),
+                                ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
-                  ],
-                ],
-              ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
