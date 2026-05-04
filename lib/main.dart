@@ -1438,16 +1438,28 @@ class _SectionTableTile extends StatelessWidget {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          if (amount != null && amount > 0)
-                            MoneyText(amount, size: 13)
-                          else
-                            Text('—',
-                                style: DS.number(color: DS.textSubtle)),
-                          const Spacer(),
-                          if (dur.isNotEmpty)
-                            Text(dur,
-                                style: DS.number(
-                                    size: 11, color: DS.textMuted)),
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: amount != null && amount > 0
+                                  ? MoneyText(amount, size: 13)
+                                  : Text(
+                                      '—',
+                                      style: DS.number(color: DS.textSubtle),
+                                    ),
+                            ),
+                          ),
+                          if (dur.isNotEmpty) ...[
+                            const SizedBox(width: DS.s6),
+                            Text(
+                              dur,
+                              style: DS.number(
+                                size: 11,
+                                color: DS.textMuted,
+                              ),
+                            ),
+                          ],
                           if (occupied) ...[
                             const SizedBox(width: DS.s6),
                             IconAction(
