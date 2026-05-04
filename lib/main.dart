@@ -5,6 +5,8 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import 'design/components.dart';
+import 'design/tokens.dart';
 import 'pos_models.dart';
 import 'pos_restaurant_store.dart';
 
@@ -17,39 +19,45 @@ void main() {
   runApp(const CashierDashApp());
 }
 
+/// Legacy palette kept for backwards compatibility with widgets that still
+/// reference `PosColors.*`. New code should use [DS] from `design/tokens.dart`.
+/// Values delegate to the design system so the whole app reflects palette
+/// changes from a single place.
 class PosColors {
-  static const Color background = Color(0xFFF8FAFC);
-  static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceHighlight = Color(0xFFF1F5F9);
-  static const Color primary = Color(0xFF2563EB);
-  static const Color primaryGlow = Color(0xFF3B82F6);
-  static const Color accent = Color(0xFF10B981);
-  static const Color warning = Color(0xFFF59E0B);
-  static const Color error = Color(0xFFEF4444);
-  static const Color textMain = Color(0xFF0F172A);
-  static const Color textMuted = Color(0xFF64748B);
-  static const Color border = Color(0xFFE2E8F0);
+  static const Color background = DS.bg;
+  static const Color surface = DS.surface;
+  static const Color surfaceHighlight = DS.surfaceMuted;
+  static const Color primary = DS.accent;
+  static const Color primaryGlow = DS.focus;
+  static const Color accent = DS.green;
+  static const Color warning = DS.amber;
+  static const Color error = DS.red;
+  static const Color textMain = DS.text;
+  static const Color textMuted = DS.textMuted;
+  static const Color border = DS.border;
 }
 
-/// Background + status border for floor table tiles (see [_FloorPlanLegend]).
-(Color bg, Color border) floorToneStyle(TableFloorTone tone) {
+/// (background, accent border, ink) for floor table tiles + legend swatches.
+/// Tones are tuned to be muted / state-only — they should never feel decorative.
+({Color bg, Color border, Color ink}) floorToneStyle(TableFloorTone tone) {
   return switch (tone) {
-    TableFloorTone.empty => (
-        const Color(0xFFF3F4F6),
-        const Color(0xFFD1D5DB),
-      ),
-    TableFloorTone.orderOpen => (
-        const Color(0xFFFFF9E6),
-        const Color(0xFFFBBF24),
-      ),
-    TableFloorTone.billPrinted => (
-        const Color(0xFFF3E8FF),
-        const Color(0xFFA855F7),
-      ),
-    TableFloorTone.paid => (
-        const Color(0xFFDCFCE7),
-        const Color(0xFF22C55E),
-      ),
+    TableFloorTone.empty =>
+      (bg: DS.surface, border: DS.border, ink: DS.textMuted),
+    TableFloorTone.orderOpen =>
+      (bg: DS.amberSurface, border: DS.amber, ink: DS.amber),
+    TableFloorTone.billPrinted =>
+      (bg: DS.violetSurface, border: DS.violet, ink: DS.violet),
+    TableFloorTone.paid =>
+      (bg: DS.greenSurface, border: DS.green, ink: DS.green),
+  };
+}
+
+String _floorToneLabel(TableFloorTone tone) {
+  return switch (tone) {
+    TableFloorTone.empty => 'Empty',
+    TableFloorTone.orderOpen => 'Order open',
+    TableFloorTone.billPrinted => 'Bill printed',
+    TableFloorTone.paid => 'Paid',
   };
 }
 
@@ -59,49 +67,50 @@ class _FloorPlanLegend extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: PosColors.surfaceHighlight.withOpacity(0.45),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: PosColors.border),
+      margin: const EdgeInsets.only(bottom: DS.s12),
+      padding: const EdgeInsets.symmetric(
+        horizontal: DS.s12,
+        vertical: DS.s8,
       ),
-      child: Wrap(
-        spacing: 14,
-        runSpacing: 8,
+      decoration: BoxDecoration(
+        color: DS.surface,
+        borderRadius: BorderRadius.circular(DS.r6),
+        border: Border.all(color: DS.border),
+      ),
+      child: Row(
         children: [
-          _chip(TableFloorTone.empty, 'Empty'),
-          _chip(TableFloorTone.orderOpen, 'Order open'),
-          _chip(TableFloorTone.billPrinted, 'Bill printed'),
-          _chip(TableFloorTone.paid, 'Paid'),
+          Text('STATUS', style: DS.eyebrow()),
+          const SizedBox(width: DS.s12),
+          Expanded(
+            child: Wrap(
+              spacing: DS.s14,
+              runSpacing: DS.s6,
+              children: [
+                for (final tone in TableFloorTone.values) _chip(tone),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _chip(TableFloorTone tone, String label) {
+  Widget _chip(TableFloorTone tone) {
     final s = floorToneStyle(tone);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 14,
-          height: 14,
+          width: 10,
+          height: 10,
           decoration: BoxDecoration(
-            color: s.$1,
-            borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: s.$2, width: 1.2),
+            color: s.bg,
+            borderRadius: BorderRadius.circular(2),
+            border: Border.all(color: s.border, width: 1),
           ),
         ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: GoogleFonts.outfit(
-            fontSize: 12,
-            color: PosColors.textMain,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
+        const SizedBox(width: DS.s6),
+        Text(_floorToneLabel(tone), style: DS.body()),
       ],
     );
   }
@@ -138,65 +147,10 @@ class _CashierDashAppState extends State<CashierDashApp> {
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = GoogleFonts.outfitTextTheme(ThemeData.light().textTheme);
-
     return MaterialApp(
       title: 'Bawarchi Cashier',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.light().copyWith(
-        scaffoldBackgroundColor: PosColors.background,
-        colorScheme: const ColorScheme.light(
-          primary: PosColors.primary,
-          secondary: PosColors.accent,
-          surface: PosColors.surface,
-          error: PosColors.error,
-        ),
-        textTheme: textTheme,
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          labelStyle: const TextStyle(color: PosColors.textMuted),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: PosColors.border),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: PosColors.border),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: PosColors.primary),
-          ),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: PosColors.primary,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            foregroundColor: PosColors.textMain,
-            side: const BorderSide(color: PosColors.border),
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        ),
-        dialogTheme: DialogThemeData(
-          backgroundColor: PosColors.surface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 0,
-        ),
-      ),
+      theme: DS.buildTheme(),
       home: _store != null
           ? DashboardScreen(
               cashierName: _cashierName,
@@ -208,7 +162,20 @@ class _CashierDashAppState extends State<CashierDashApp> {
   }
 }
 
+/// Legacy "glass" wrapper. There is no glass anymore — this is a flat
+/// 1px-bordered surface. Kept named for source compatibility; new code should
+/// use [Surface] from `design/components.dart`.
 class GlassContainer extends StatelessWidget {
+  const GlassContainer({
+    super.key,
+    required this.child,
+    this.padding,
+    this.margin,
+    this.borderRadius = DS.r6,
+    this.color,
+    this.border,
+  });
+
   final Widget child;
   final EdgeInsetsGeometry? padding;
   final EdgeInsetsGeometry? margin;
@@ -216,24 +183,14 @@ class GlassContainer extends StatelessWidget {
   final Color? color;
   final BoxBorder? border;
 
-  const GlassContainer({
-    super.key,
-    required this.child,
-    this.padding,
-    this.margin,
-    this.borderRadius = 8.0,
-    this.color,
-    this.border,
-  });
-
   @override
   Widget build(BuildContext context) {
     return Container(
       margin: margin,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(borderRadius),
-        border: border ?? Border.all(color: PosColors.border.withOpacity(0.5)),
-        color: color ?? Colors.white,
+        border: border ?? Border.all(color: DS.border),
+        color: color ?? DS.surface,
       ),
       child: Padding(
         padding: padding ?? EdgeInsets.zero,
@@ -356,7 +313,7 @@ class _LoginScreenState extends State<LoginScreen>
                       const SizedBox(height: 24),
                       Text(
                         'Bawarchi',
-                        style: GoogleFonts.outfit(
+                        style: GoogleFonts.inter(
                           fontSize: 32,
                           fontWeight: FontWeight.bold,
                           color: PosColors.textMain,
@@ -367,7 +324,7 @@ class _LoginScreenState extends State<LoginScreen>
                       Text(
                         'Sign in with your cashier phone and password.',
                         textAlign: TextAlign.center,
-                        style: GoogleFonts.outfit(
+                        style: GoogleFonts.inter(
                           color: PosColors.textMuted,
                           fontSize: 15,
                         ),
@@ -405,7 +362,7 @@ class _LoginScreenState extends State<LoginScreen>
                         const SizedBox(height: 16),
                         Text(
                           _loginError!,
-                          style: GoogleFonts.outfit(
+                          style: GoogleFonts.inter(
                             color: PosColors.error,
                             fontSize: 13,
                           ),
@@ -427,7 +384,7 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           child: Text(
                             _busy ? 'Signing in…' : 'Access Terminal',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                               fontSize: 18,
                               fontWeight: FontWeight.w600,
                               letterSpacing: 0.5,
@@ -507,7 +464,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('New section', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+        title: Text('New section', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
@@ -549,7 +506,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Add table', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+        title: Text('Add table', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -619,10 +576,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final go = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete section?', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+        title: Text('Delete section?', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
         content: Text(
           'Remove "${section.name}"? Tables must be removed from this section first.',
-          style: GoogleFonts.outfit(),
+          style: GoogleFonts.inter(),
         ),
         actions: [
           TextButton(
@@ -917,112 +874,118 @@ class PosSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 70,
-      margin: const EdgeInsets.fromLTRB(12, 12, 4, 12),
-      child: GlassContainer(
-        padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Column(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: PosColors.primary,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.restaurant, color: Colors.white, size: 22),
+      width: DS.sidebarWidth,
+      decoration: const BoxDecoration(
+        color: DS.surface,
+        border: Border(right: BorderSide(color: DS.border)),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: DS.s12),
+          // Mark / brand. Square monogram, never an emoji icon.
+          Container(
+            width: 32,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: DS.accent,
+              borderRadius: BorderRadius.circular(DS.r6),
             ),
-            const SizedBox(height: 36),
-            _SidebarItem(
-              icon: Icons.grid_view_rounded,
-              tooltip: 'Floor Plan',
-              isSelected: section == PosSection.floor,
-              onTap: () => onChangeSection(PosSection.floor),
+            child: Text(
+              'B',
+              style: DS.bodyStrong(color: DS.accentInk),
             ),
-            const SizedBox(height: 16),
-            _SidebarItem(
-              icon: Icons.restaurant_menu_rounded,
-              tooltip: 'Menu Catalog',
-              isSelected: section == PosSection.menu,
-              onTap: () => onChangeSection(PosSection.menu),
-            ),
-            const SizedBox(height: 16),
-            _SidebarItem(
-              icon: Icons.receipt_long_rounded,
-              tooltip: 'Billing Queue',
-              isSelected: section == PosSection.billing,
-              onTap: () => onChangeSection(PosSection.billing),
-            ),
-            const SizedBox(height: 16),
-            _SidebarItem(
-              icon: Icons.history_rounded,
-              tooltip: 'Transactions',
-              isSelected: section == PosSection.transactions,
-              onTap: () => onChangeSection(PosSection.transactions),
-            ),
-            const Spacer(),
-            _SidebarItem(
-              icon: Icons.logout_rounded,
-              tooltip: 'Logout',
-              isSelected: false,
-              onTap: onLogout,
-              color: PosColors.error,
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(height: DS.s20),
+          _SidebarItem(
+            icon: Icons.grid_view_outlined,
+            tooltip: 'Floor',
+            isSelected: section == PosSection.floor,
+            onTap: () => onChangeSection(PosSection.floor),
+          ),
+          _SidebarItem(
+            icon: Icons.menu_book_outlined,
+            tooltip: 'Menu',
+            isSelected: section == PosSection.menu,
+            onTap: () => onChangeSection(PosSection.menu),
+          ),
+          _SidebarItem(
+            icon: Icons.receipt_long_outlined,
+            tooltip: 'Bills',
+            isSelected: section == PosSection.billing,
+            onTap: () => onChangeSection(PosSection.billing),
+          ),
+          _SidebarItem(
+            icon: Icons.history,
+            tooltip: 'History',
+            isSelected: section == PosSection.transactions,
+            onTap: () => onChangeSection(PosSection.transactions),
+          ),
+          const Spacer(),
+          _SidebarItem(
+            icon: Icons.logout,
+            tooltip: 'Sign out',
+            isSelected: false,
+            onTap: onLogout,
+            danger: true,
+          ),
+          const SizedBox(height: DS.s12),
+        ],
       ),
     );
   }
 }
 
 class _SidebarItem extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final bool isSelected;
-  final VoidCallback onTap;
-  final Color? color;
-
   const _SidebarItem({
     required this.icon,
     required this.tooltip,
     required this.isSelected,
     required this.onTap,
-    this.color,
+    this.danger = false,
   });
+
+  final IconData icon;
+  final String tooltip;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final bool danger;
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = color ?? PosColors.primary;
-    final iconColor = isSelected ? activeColor : PosColors.textMuted;
-
-    return Tooltip(
-      message: tooltip,
-      preferBelow: false,
-      verticalOffset: 30,
-      textStyle: GoogleFonts.outfit(color: PosColors.textMain, fontSize: 14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: PosColors.border),
-      ),
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 250),
-          width: 44,
-          height: 44,
-          decoration: BoxDecoration(
-            color: isSelected
-                ? activeColor.withOpacity(0.15)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected
-                  ? activeColor.withOpacity(0.3)
-                  : Colors.transparent,
+    final fg = danger
+        ? DS.red
+        : (isSelected ? DS.text : DS.textMuted);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Tooltip(
+        message: tooltip,
+        preferBelow: false,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            child: SizedBox(
+              width: DS.sidebarWidth,
+              height: 44,
+              child: Stack(
+                children: [
+                  if (isSelected)
+                    Positioned.fill(
+                      child: Row(
+                        children: [
+                          Container(width: 2, color: DS.accent),
+                          const SizedBox.shrink(),
+                        ],
+                      ),
+                    ),
+                  Center(
+                    child: Icon(icon, size: 20, color: fg),
+                  ),
+                ],
+              ),
             ),
           ),
-          child: Icon(icon, color: iconColor, size: 22),
         ),
       ),
     );
@@ -1040,40 +1003,38 @@ class _DashboardLoadBanner extends StatelessWidget {
     if (err == null || err.trim().isEmpty) {
       return const SizedBox.shrink();
     }
-    return Material(
-      color: const Color(0xFFFFF7ED),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(
-              Icons.warning_amber_rounded,
-              color: Color(0xFFEA580C),
-              size: 22,
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: DS.s12,
+        vertical: DS.s8,
+      ),
+      decoration: const BoxDecoration(
+        color: DS.amberSurface,
+        border: Border(bottom: BorderSide(color: DS.border)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          StatusDot(DS.amber, size: 8),
+          const SizedBox(width: DS.s8),
+          Expanded(
+            child: Text(
+              err,
+              style: DS.body(color: DS.amber),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                err,
-                style: GoogleFonts.outfit(
-                  fontSize: 13,
-                  color: const Color(0xFF9A3412),
-                ),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                store.refreshAll();
-              },
-              child: const Text('Retry'),
-            ),
-            TextButton(
-              onPressed: store.clearLastError,
-              child: const Text('Dismiss'),
-            ),
-          ],
-        ),
+          ),
+          const SizedBox(width: DS.s8),
+          TextButton(
+            onPressed: store.refreshAll,
+            child: const Text('Retry'),
+          ),
+          TextButton(
+            onPressed: store.clearLastError,
+            child: const Text('Dismiss'),
+          ),
+        ],
       ),
     );
   }
@@ -1091,108 +1052,70 @@ class DashboardTopBar extends StatelessWidget {
   final String cashierName;
   final String? restaurantId;
 
+  String _hhmm() {
+    final now = DateTime.now();
+    return '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(6, 12, 12, 12),
-      child: GlassContainer(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  section.title,
-                  style: GoogleFonts.outfit(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: PosColors.textMain,
-                  ),
-                ),
-                Text(
-                  section.subtitle,
-                  style: GoogleFonts.outfit(
-                    fontSize: 12,
-                    color: PosColors.textMuted,
-                  ),
-                ),
-                if (restaurantId case final String rid when rid.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    'Signed-in restaurant: $rid — menu is only items for this tenant. '
-                    'In Admin, select the same restaurant when adding menu items.',
-                    style: GoogleFonts.outfit(
-                      fontSize: 11,
-                      color: PosColors.textMuted,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: PosColors.surfaceHighlight.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: PosColors.border.withOpacity(0.5)),
-              ),
+      height: 48,
+      padding: const EdgeInsets.symmetric(horizontal: DS.s16),
+      decoration: const BoxDecoration(
+        color: DS.surface,
+        border: Border(bottom: BorderSide(color: DS.border)),
+      ),
+      child: Row(
+        children: [
+          Text(section.title, style: DS.display()),
+          const SizedBox(width: DS.s10),
+          Container(width: 1, height: 18, color: DS.border),
+          const SizedBox(width: DS.s10),
+          Text(section.subtitle, style: DS.body(color: DS.textMuted)),
+          const Spacer(),
+          if (restaurantId case final String rid when rid.isNotEmpty) ...[
+            Tooltip(
+              message:
+                  'Signed-in restaurant: $rid\nMenu is scoped to this tenant.',
               child: Row(
                 children: [
-                  const Icon(Icons.schedule, size: 18, color: PosColors.textMuted),
-                  const SizedBox(width: 6),
+                  Text('TENANT', style: DS.eyebrow()),
+                  const SizedBox(width: DS.s6),
                   Text(
-                    '${DateTime.now().hour.toString().padLeft(2, '0')}:${DateTime.now().minute.toString().padLeft(2, '0')}',
-                    style: GoogleFonts.outfit(
-                      color: PosColors.textMain,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 14,
-                    ),
+                    rid.length > 8 ? '${rid.substring(0, 8)}…' : rid,
+                    style: DS.number(size: 12),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            Container(
-              height: 40,
-              padding: const EdgeInsets.only(left: 4, right: 12, top: 4, bottom: 4),
-              decoration: BoxDecoration(
-                color: PosColors.surfaceHighlight.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: PosColors.border.withOpacity(0.5)),
-              ),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: PosColors.primary.withOpacity(0.2),
-                    child: Text(
-                      cashierName.isNotEmpty
-                          ? cashierName[0].toUpperCase()
-                          : '?',
-                      style: GoogleFonts.outfit(
-                        color: PosColors.primary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    cashierName,
-                    style: GoogleFonts.outfit(
-                      color: PosColors.textMain,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            const SizedBox(width: DS.s16),
           ],
-        ),
+          Text(_hhmm(), style: DS.number(size: 12, color: DS.textMuted)),
+          const SizedBox(width: DS.s16),
+          Row(
+            children: [
+              Container(
+                width: 26,
+                height: 26,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: DS.surfaceMuted,
+                  borderRadius: BorderRadius.circular(DS.r6),
+                  border: Border.all(color: DS.border),
+                ),
+                child: Text(
+                  cashierName.isNotEmpty
+                      ? cashierName[0].toUpperCase()
+                      : '?',
+                  style: DS.bodyStrong(),
+                ),
+              ),
+              const SizedBox(width: DS.s8),
+              Text(cashierName, style: DS.bodyStrong()),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1234,41 +1157,36 @@ class RestaurantFloorTab extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: GlassContainer(
-            borderRadius: 0,
-            border: const Border(top: BorderSide(color: PosColors.border)),
+          child: ColoredBox(
+            color: DS.bg,
             child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              padding: const EdgeInsets.fromLTRB(
+                DS.s16,
+                DS.s12,
+                DS.s16,
+                DS.s24,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const _FloorPlanLegend(),
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: FilledButton.tonalIcon(
+                    child: OutlinedButton.icon(
                       onPressed: onAddSection,
-                      icon: const Icon(Icons.add, size: 20),
-                      label: const Text('Add section'),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
+                      icon: const Icon(Icons.add, size: 16),
+                      label: const Text('New section'),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: DS.s16),
                   if (store.sections.isEmpty)
                     Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 32),
+                      padding: const EdgeInsets.symmetric(vertical: DS.s24),
                       child: Center(
                         child: Text(
                           'Create a section first, then add tables under it.',
                           textAlign: TextAlign.center,
-                          style: GoogleFonts.outfit(
-                            color: PosColors.textMuted,
-                            fontSize: 14,
-                          ),
+                          style: DS.body(color: DS.textMuted),
                         ),
                       ),
                     ),
@@ -1287,15 +1205,8 @@ class RestaurantFloorTab extends StatelessWidget {
                     ),
                   ),
                   if (store.tablesWithoutSection.isNotEmpty) ...[
-                    Text(
-                      'Other tables',
-                      style: GoogleFonts.outfit(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: PosColors.textMain,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
+                    Text('OTHER TABLES', style: DS.eyebrow()),
+                    const SizedBox(height: DS.s8),
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
@@ -1358,49 +1269,56 @@ class _FloorSectionBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tables = store.tablesInSection(section.id);
+    final occupied = tables.where((t) => store.hasActiveOrder(t.id)).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Expanded(
+            Text(section.name.toUpperCase(), style: DS.eyebrow()),
+            const SizedBox(width: DS.s8),
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: DS.s6,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: DS.surfaceMuted,
+                borderRadius: BorderRadius.circular(DS.r4),
+              ),
               child: Text(
-                section.name,
-                style: GoogleFonts.outfit(
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
-                  color: PosColors.textMain,
-                ),
+                '$occupied / ${tables.length}',
+                style: DS.number(size: 11, color: DS.textMuted),
               ),
             ),
-            IconButton(
+            const Spacer(),
+            IconAction(
+              icon: Icons.add,
               tooltip: 'Add table',
-              onPressed: onAddTable,
-              icon: const Icon(Icons.add_circle_outline, color: PosColors.primary),
+              onTap: onAddTable,
             ),
-            IconButton(
+            const SizedBox(width: DS.s4),
+            IconAction(
+              icon: Icons.delete_outline,
               tooltip: 'Delete section',
-              onPressed: onDeleteSection,
-              icon: Icon(
-                Icons.delete_outline,
-                color: PosColors.error.withValues(alpha: 0.85),
-              ),
+              danger: true,
+              onTap: onDeleteSection,
             ),
           ],
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: DS.s8),
         if (tables.isEmpty)
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.only(bottom: DS.s8),
             child: Text(
-              'No tables yet — tap + to add.',
-              style: GoogleFonts.outfit(fontSize: 13, color: PosColors.textMuted),
+              'No tables in this section. Use + to add.',
+              style: DS.body(color: DS.textMuted),
             ),
           ),
         Wrap(
-          spacing: 10,
-          runSpacing: 10,
+          spacing: DS.s8,
+          runSpacing: DS.s8,
           children: [
             for (final t in tables)
               _SectionTableTile(
@@ -1417,6 +1335,8 @@ class _FloorSectionBlock extends StatelessWidget {
   }
 }
 
+/// Compact, information-dense table tile. The status color is the **left
+/// edge bar**; the body stays neutral so prices and labels stay legible.
 class _SectionTableTile extends StatelessWidget {
   const _SectionTableTile({
     required this.table,
@@ -1432,140 +1352,118 @@ class _SectionTableTile extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onBillPreview;
 
-  static const double _cardSize = 104;
+  static const double _cardWidth = 168;
+  static const double _cardHeight = 80;
 
   String _durationLabel() {
     final start = table.orderStartedAt;
-    if (start == null) {
-      return '';
-    }
-    final m = DateTime.now().difference(start).inMinutes;
-    return '$m Min';
+    if (start == null) return '';
+    final mins = DateTime.now().difference(start).inMinutes;
+    if (mins < 60) return '${mins}m';
+    final h = mins ~/ 60;
+    final m = mins % 60;
+    return m == 0 ? '${h}h' : '${h}h ${m}m';
   }
 
-  String _amountLine() {
-    if (table.activeOrderTotal != null) {
-      return '₹ ${table.activeOrderTotal!.toStringAsFixed(2)}';
-    }
+  double? _activeAmount() {
+    if (table.activeOrderTotal != null) return table.activeOrderTotal;
     if (table.status == TableStatus.occupied) {
-      return store.calculateBill(table.id).totalFormatted;
+      return store.calculateBill(table.id).total;
     }
-    return '';
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    final occupied = table.status == TableStatus.occupied;
     final tone = store.tableFloorToneFor(table.id);
     final st = floorToneStyle(tone);
-    final bg = st.$1;
-    final statusBorder = st.$2;
-    final borderColor = selected ? PosColors.primary : statusBorder;
+    final occupied = table.status == TableStatus.occupied;
+    final amount = _activeAmount();
+    final dur = _durationLabel();
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(DS.r6),
         child: Container(
-          width: _cardSize,
-          height: _cardSize,
-          padding: const EdgeInsets.all(8),
+          width: _cardWidth,
+          height: _cardHeight,
           decoration: BoxDecoration(
-            color: bg,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: borderColor, width: selected ? 2 : 1.2),
+            color: DS.surface,
+            borderRadius: BorderRadius.circular(DS.r6),
+            border: Border.all(
+              color: selected ? DS.accent : DS.border,
+              width: selected ? 1.4 : 1,
+            ),
           ),
-          child: occupied
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (table.orderStartedAt != null)
-                      Text(
-                        _durationLabel(),
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.outfit(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      )
-                    else
-                      const SizedBox(height: 11),
-                    Expanded(
-                      child: Center(
-                        child: Text(
-                          table.name,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.outfit(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                            color: PosColors.textMain,
-                          ),
-                        ),
-                      ),
-                    ),
-                    if (_amountLine().isNotEmpty)
-                      Text(
-                        _amountLine(),
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.outfit(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: PosColors.textMain,
-                        ),
-                      ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _MiniIconButton(
-                          icon: Icons.print_rounded,
-                          onPressed: onBillPreview,
-                        ),
-                        const SizedBox(width: 8),
-                        _MiniIconButton(
-                          icon: Icons.visibility_outlined,
-                          onPressed: onTap,
-                        ),
-                      ],
-                    ),
-                  ],
-                )
-              : Center(
-                  child: Text(
-                    table.name,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.outfit(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 15,
-                      color: PosColors.textMain,
-                    ),
+          child: Row(
+            children: [
+              // Status edge — only colored part of the tile.
+              Container(
+                width: 4,
+                decoration: BoxDecoration(
+                  color: st.border,
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(DS.r6),
+                    bottomLeft: Radius.circular(DS.r6),
                   ),
                 ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MiniIconButton extends StatelessWidget {
-  const _MiniIconButton({required this.icon, required this.onPressed});
-
-  final IconData icon;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 28,
-      height: 28,
-      child: Material(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        child: InkWell(
-          onTap: onPressed,
-          borderRadius: BorderRadius.circular(6),
-          child: Icon(icon, size: 16, color: PosColors.textMain),
+              ),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: DS.s10,
+                    vertical: DS.s8,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              table.name,
+                              style: DS.bodyStrong(),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Text(
+                            _floorToneLabel(tone),
+                            style: DS.caption(color: st.ink),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          if (amount != null && amount > 0)
+                            MoneyText(amount, size: 13)
+                          else
+                            Text('—',
+                                style: DS.number(color: DS.textSubtle)),
+                          const Spacer(),
+                          if (dur.isNotEmpty)
+                            Text(dur,
+                                style: DS.number(
+                                    size: 11, color: DS.textMuted)),
+                          if (occupied) ...[
+                            const SizedBox(width: DS.s6),
+                            IconAction(
+                              icon: Icons.print_outlined,
+                              tooltip: 'Bill / receipt',
+                              onTap: onBillPreview,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1612,7 +1510,7 @@ class TableWorkbench extends StatelessWidget {
               const SizedBox(height: 24),
               Text(
                 'Select a Table',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: PosColors.textMuted,
@@ -1622,7 +1520,7 @@ class TableWorkbench extends StatelessWidget {
               Text(
                 'Tap on the floor canvas\nto manage orders.',
                 textAlign: TextAlign.center,
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   color: PosColors.textMuted.withOpacity(0.6),
                   fontSize: 15,
                 ),
@@ -1676,7 +1574,7 @@ class TableWorkbench extends StatelessWidget {
                     children: [
                       Text(
                         table.name,
-                        style: GoogleFonts.outfit(
+                        style: GoogleFonts.inter(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: PosColors.textMain,
@@ -1684,7 +1582,7 @@ class TableWorkbench extends StatelessWidget {
                       ),
                       Text(
                         '${table.capacity} Seats • ${table.statusLabel}',
-                        style: GoogleFonts.outfit(
+                        style: GoogleFonts.inter(
                           color: PosColors.textMuted,
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
@@ -1712,7 +1610,7 @@ class TableWorkbench extends StatelessWidget {
                               color: PosColors.textMain, size: 18),
                           const SizedBox(width: 10),
                           Text('Mark Occupied',
-                              style: GoogleFonts.outfit(
+                              style: GoogleFonts.inter(
                                   fontSize: 13,
                                   color: PosColors.textMain)),
                         ],
@@ -1727,7 +1625,7 @@ class TableWorkbench extends StatelessWidget {
                               color: PosColors.error, size: 18),
                           const SizedBox(width: 10),
                           Text('Delete Table',
-                              style: GoogleFonts.outfit(
+                              style: GoogleFonts.inter(
                                   fontSize: 13,
                                   color: PosColors.error)),
                         ],
@@ -1751,7 +1649,7 @@ class TableWorkbench extends StatelessWidget {
                             color: PosColors.textMuted.withOpacity(0.3)),
                         const SizedBox(height: 12),
                         Text('No active orders',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                                 color: PosColors.textMuted, fontSize: 14)),
                       ],
                     ),
@@ -1767,7 +1665,7 @@ class TableWorkbench extends StatelessWidget {
                           Expanded(
                             child: Text(
                               '${line.quantity}× ${line.itemName}',
-                              style: GoogleFonts.outfit(
+                              style: GoogleFonts.inter(
                                 color: PosColors.textMain,
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
@@ -1776,7 +1674,7 @@ class TableWorkbench extends StatelessWidget {
                           ),
                           Text(
                             line.lineTotalFormatted,
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                               color: PosColors.textMain,
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
@@ -1797,7 +1695,7 @@ class TableWorkbench extends StatelessWidget {
                 children: [
                   Text(
                     'Quick Add',
-                    style: GoogleFonts.outfit(
+                    style: GoogleFonts.inter(
                       color: PosColors.textMuted,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
@@ -1828,7 +1726,7 @@ class TableWorkbench extends StatelessWidget {
                                 children: [
                                   Text(
                                     item.name,
-                                    style: GoogleFonts.outfit(
+                                    style: GoogleFonts.inter(
                                       fontSize: 13,
                                       color: PosColors.textMain,
                                       fontWeight: FontWeight.w500,
@@ -1837,7 +1735,7 @@ class TableWorkbench extends StatelessWidget {
                                   const SizedBox(width: 6),
                                   Text(
                                     item.formattedPrice,
-                                    style: GoogleFonts.outfit(
+                                    style: GoogleFonts.inter(
                                       color: PosColors.accent,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 11,
@@ -1962,7 +1860,7 @@ class _SummaryRow extends StatelessWidget {
       children: [
         Text(
           label,
-          style: GoogleFonts.outfit(
+          style: GoogleFonts.inter(
             color: isTotal ? PosColors.textMain : PosColors.textMuted,
             fontSize: isTotal ? 16 : 14,
             fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
@@ -1970,7 +1868,7 @@ class _SummaryRow extends StatelessWidget {
         ),
         Text(
           value,
-          style: GoogleFonts.outfit(
+          style: GoogleFonts.inter(
             color: isTotal ? PosColors.primaryGlow : PosColors.textMain,
             fontSize: isTotal ? 24 : 15,
             fontWeight: FontWeight.bold,
@@ -2020,7 +1918,7 @@ class MenuSection extends StatelessWidget {
                 const SizedBox(width: 12),
                 Text(
                   'Menu Catalog',
-                  style: GoogleFonts.outfit(
+                  style: GoogleFonts.inter(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: PosColors.textMain,
@@ -2051,7 +1949,7 @@ class MenuSection extends StatelessWidget {
                           const SizedBox(height: 12),
                           Text(
                             'Your catalog is empty',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                               color: PosColors.textMuted,
@@ -2060,7 +1958,7 @@ class MenuSection extends StatelessWidget {
                           const SizedBox(height: 6),
                           Text(
                             'Click the Add Menu Item button to get started.',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: PosColors.textMuted),
                           ),
@@ -2084,7 +1982,7 @@ class MenuSection extends StatelessWidget {
                                 ),
                                 child: Text(
                                   item.category.toUpperCase(),
-                                  style: GoogleFonts.outfit(
+                                  style: GoogleFonts.inter(
                                     color: PosColors.primary,
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
@@ -2095,7 +1993,7 @@ class MenuSection extends StatelessWidget {
                               Expanded(
                                 child: Text(
                                   item.name,
-                                  style: GoogleFonts.outfit(
+                                  style: GoogleFonts.inter(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
                                     color: PosColors.textMain,
@@ -2104,7 +2002,7 @@ class MenuSection extends StatelessWidget {
                               ),
                               Text(
                                 item.formattedPrice,
-                                style: GoogleFonts.outfit(
+                                style: GoogleFonts.inter(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                   color: PosColors.accent,
@@ -2169,7 +2067,7 @@ class BillingSection extends StatelessWidget {
                 const SizedBox(width: 12),
                 Text(
                   'Active Bills Queue',
-                  style: GoogleFonts.outfit(
+                  style: GoogleFonts.inter(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: PosColors.textMain,
@@ -2190,7 +2088,7 @@ class BillingSection extends StatelessWidget {
                           const SizedBox(height: 12),
                           Text(
                             'All caught up!',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                               color: PosColors.textMuted,
@@ -2199,7 +2097,7 @@ class BillingSection extends StatelessWidget {
                           const SizedBox(height: 6),
                           Text(
                             'There are no active bills right now.',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: PosColors.textMuted),
                           ),
@@ -2239,7 +2137,7 @@ class BillingSection extends StatelessWidget {
                                   children: [
                                     Text(
                                       table.name,
-                                      style: GoogleFonts.outfit(
+                                      style: GoogleFonts.inter(
                                         fontSize: 16,
                                         fontWeight: FontWeight.bold,
                                         color: PosColors.textMain,
@@ -2247,7 +2145,7 @@ class BillingSection extends StatelessWidget {
                                     ),
                                     Text(
                                       '$itemUnits items ordered',
-                                      style: GoogleFonts.outfit(
+                                      style: GoogleFonts.inter(
                                         color: PosColors.textMuted,
                                         fontSize: 12,
                                       ),
@@ -2257,7 +2155,7 @@ class BillingSection extends StatelessWidget {
                               ),
                               Text(
                                 totals.totalFormatted,
-                                style: GoogleFonts.outfit(
+                                style: GoogleFonts.inter(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   color: PosColors.primaryGlow,
@@ -2345,7 +2243,7 @@ class TransactionsSection extends StatelessWidget {
                 const SizedBox(width: 12),
                 Text(
                   'Transaction History',
-                  style: GoogleFonts.outfit(
+                  style: GoogleFonts.inter(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                     color: PosColors.textMain,
@@ -2366,7 +2264,7 @@ class TransactionsSection extends StatelessWidget {
                           const SizedBox(height: 12),
                           Text(
                             'No transactions yet',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                               fontSize: 18,
                               fontWeight: FontWeight.bold,
                               color: PosColors.textMuted,
@@ -2375,7 +2273,7 @@ class TransactionsSection extends StatelessWidget {
                           const SizedBox(height: 6),
                           Text(
                             'Completed orders will appear here.',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                                 fontSize: 13,
                                 color: PosColors.textMuted),
                           ),
@@ -2407,7 +2305,7 @@ class TransactionsSection extends StatelessWidget {
                                   children: [
                                     Text(
                                       txn.tableName,
-                                      style: GoogleFonts.outfit(
+                                      style: GoogleFonts.inter(
                                         fontSize: 15,
                                         fontWeight: FontWeight.bold,
                                         color: PosColors.textMain,
@@ -2422,7 +2320,7 @@ class TransactionsSection extends StatelessWidget {
                               ),
                               Text(
                                 txn.totals.totalFormatted,
-                                style: GoogleFonts.outfit(
+                                style: GoogleFonts.inter(
                                   fontSize: 16,
                                   fontWeight: FontWeight.bold,
                                   color: PosColors.textMain,
@@ -2588,7 +2486,7 @@ class BillReceiptDialog extends StatelessWidget {
               const SizedBox(height: 16),
               Text(
                 'HYPER POS',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   fontSize: 22,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.5,
@@ -2597,7 +2495,7 @@ class BillReceiptDialog extends StatelessWidget {
               ),
               Text(
                 title,
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   color: PosColors.textMuted,
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -2612,10 +2510,10 @@ class BillReceiptDialog extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Table: $tableName', 
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: PosColors.textMain)),
+                    style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: PosColors.textMain)),
                   Text(
                     '${timestamp.day}/${timestamp.month} ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}',
-                    style: GoogleFonts.outfit(color: PosColors.textMuted, fontSize: 12),
+                    style: GoogleFonts.inter(color: PosColors.textMuted, fontSize: 12),
                   ),
                 ],
               ),
@@ -2634,7 +2532,7 @@ class BillReceiptDialog extends StatelessWidget {
                           Expanded(
                             child: Text(
                               '${line.quantity}× ${line.itemName}',
-                              style: GoogleFonts.outfit(
+                              style: GoogleFonts.inter(
                                 color: PosColors.textMain,
                                 fontSize: 14,
                                 fontWeight: FontWeight.w500,
@@ -2643,7 +2541,7 @@ class BillReceiptDialog extends StatelessWidget {
                           ),
                           Text(
                             line.lineTotalFormatted,
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                               color: PosColors.textMain,
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
@@ -2673,7 +2571,7 @@ class BillReceiptDialog extends StatelessWidget {
                       child: OutlinedButton.icon(
                         onPressed: () async => _printBill(),
                         icon: const Icon(Icons.print_rounded, size: 20),
-                        label: Text('Print', style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+                        label: Text('Print', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                         style: OutlinedButton.styleFrom(
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
@@ -2689,7 +2587,7 @@ class BillReceiptDialog extends StatelessWidget {
                         style: ElevatedButton.styleFrom(
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        child: Text('Close', style: GoogleFonts.outfit(fontWeight: FontWeight.w600)),
+                        child: Text('Close', style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
                       ),
                     ),
                   ),
@@ -2708,7 +2606,7 @@ class BillReceiptDialog extends StatelessWidget {
       children: [
         Text(
           label,
-          style: GoogleFonts.outfit(
+          style: GoogleFonts.inter(
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
             fontSize: isBold ? 18 : 14,
             color: isBold ? PosColors.textMain : PosColors.textMuted,
@@ -2716,7 +2614,7 @@ class BillReceiptDialog extends StatelessWidget {
         ),
         Text(
           value,
-          style: GoogleFonts.outfit(
+          style: GoogleFonts.inter(
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
             fontSize: isBold ? 20 : 14,
             color: isBold ? PosColors.primary : PosColors.textMain,
@@ -2798,7 +2696,7 @@ class _CreateTableDialogState extends State<CreateTableDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text('Build New Table',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
       content: Form(
         key: _formKey,
         child: Column(
@@ -2871,7 +2769,7 @@ class _AddMenuItemDialogState extends State<AddMenuItemDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text('New Catalog Item',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
       content: Form(
         key: _formKey,
         child: Column(
@@ -2955,7 +2853,7 @@ class _AddOrderDialogState extends State<AddOrderDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text('Add to Order',
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+          style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
       content: Form(
         key: _formKey,
         child: Column(
