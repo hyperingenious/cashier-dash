@@ -765,7 +765,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           onSettle: () {
             final table = _selectedTable;
             if (table != null) {
-              widget.store.settleBill(table.id).then((_) {
+              widget.store.markTablePaid(table.id).then((_) {
                 if (mounted) setState(() {});
               });
             }
@@ -791,7 +791,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return BillingSection(
           store: widget.store,
           onSettle: (table) {
-            widget.store.settleBill(table.id).then((_) {
+            widget.store.markTablePaid(table.id).then((_) {
               if (mounted) setState(() {});
             });
           },
@@ -1660,6 +1660,7 @@ class TableWorkbench extends StatelessWidget {
                     if (value == 'cancel_order') {
                       _confirmCancelOrder(context, store, table);
                     }
+                    if (value == 'mark_paid') onSettle();
                   },
                   itemBuilder: (context) => [
                     if (lines.isNotEmpty)
@@ -1675,6 +1676,22 @@ class TableWorkbench extends StatelessWidget {
                                 style: GoogleFonts.inter(
                                     fontSize: 13,
                                     color: PosColors.error)),
+                          ],
+                        ),
+                      ),
+                    if (lines.isNotEmpty)
+                      PopupMenuItem(
+                        value: 'mark_paid',
+                        height: 36,
+                        child: Row(
+                          children: [
+                            const Icon(Icons.payments_outlined,
+                                color: PosColors.accent, size: 18),
+                            const SizedBox(width: 10),
+                            Text('Mark paid',
+                                style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: PosColors.textMain)),
                           ],
                         ),
                       ),
@@ -1941,16 +1958,22 @@ class TableWorkbench extends StatelessWidget {
                     ),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: lines.isEmpty ? null : onSettle,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: PosColors.accent,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          disabledBackgroundColor:
-                              PosColors.surfaceHighlight.withOpacity(0.5),
+                      child: Tooltip(
+                        message:
+                            'Record full payment as cash and close the order',
+                        child: ElevatedButton.icon(
+                          onPressed: lines.isEmpty ? null : onSettle,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: PosColors.accent,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            disabledBackgroundColor:
+                                PosColors.surfaceHighlight.withOpacity(0.5),
+                          ),
+                          icon:
+                              const Icon(Icons.payments_outlined, size: 14),
+                          label: const Text('Mark paid',
+                              style: TextStyle(fontSize: 11)),
                         ),
-                        icon: const Icon(Icons.check_circle_outline, size: 14),
-                        label: const Text('Settle', style: TextStyle(fontSize: 11)),
                       ),
                     ),
                   ],
@@ -2326,16 +2349,22 @@ class BillingSection extends StatelessWidget {
                                 child: const Text('Void', style: TextStyle(fontSize: 12)),
                               ),
                               const SizedBox(width: 4),
-                              ElevatedButton(
-                                onPressed: () => onSettle(table),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: PosColors.accent,
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12, vertical: 8),
-                                  minimumSize: Size.zero,
-                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              Tooltip(
+                                message:
+                                    'Record full payment as cash and close the order',
+                                child: ElevatedButton(
+                                  onPressed: () => onSettle(table),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: PosColors.accent,
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 8),
+                                    minimumSize: Size.zero,
+                                    tapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                  ),
+                                  child: const Text('Mark paid',
+                                      style: TextStyle(fontSize: 12)),
                                 ),
-                                child: const Text('Settle', style: TextStyle(fontSize: 12)),
                               ),
                             ],
                           ),

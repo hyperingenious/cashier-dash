@@ -708,10 +708,14 @@ class RestaurantStore extends ChangeNotifier {
       markTablePaidHighlight(tableId);
       await refreshAll();
     } catch (e) {
-      lastError = e.toString();
+      lastError = _dioErrorMessage(e);
       notifyListeners();
     }
   }
+
+  /// Same as [settleBill]: records **cash** for the full balance and completes
+  /// the order so the table is free (green highlight on the floor).
+  Future<void> markTablePaid(String tableId) => settleBill(tableId);
 
   Future<void> addItemToOrder({
     required String tableId,
