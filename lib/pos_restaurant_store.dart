@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import 'pos_models.dart';
+import 'realtime/realtime_client.dart';
 
 double _dec(dynamic v) {
   if (v == null) {
@@ -115,6 +116,11 @@ class RestaurantStore extends ChangeNotifier {
     String? cashierRestaurantId,
   }) {
     final root = normalizeApiBaseUrl(baseUrl);
+    final wsUri = Uri.parse(root).replace(
+      scheme: Uri.parse(root).scheme == 'https' ? 'wss' : 'ws',
+      path: '/ws',
+    );
+    final wsRoot = wsUri.toString();
     final dio = Dio(
       BaseOptions(
         baseUrl: root,
@@ -124,13 +130,39 @@ class RestaurantStore extends ChangeNotifier {
         },
       ),
     );
-    return RestaurantStore._(
+    final store = RestaurantStore._(
       dio,
       cashierRestaurantId: cashierRestaurantId,
-    )..refreshAll();
+    );
+    
+    store._realtime = RealtimeClient(
+      url: wsRoot,
+      tokenProvider: () => token,
+    )..connect();
+
+    store._realtime?.events.listen((event) {
+      final type = event['type'] as String?;
+      if (type == null) return;
+      // Refresh on any event that could affect tables, orders, or KOTs
+      if (type == 'kot_created' ||
+          type == 'kot_status_updated' ||
+          type == 'kot_delivered' ||
+          type == 'kot_consumed' ||
+          type == 'tables_updated' ||
+          type == 'order_completed' ||
+          type == 'order_updated' ||
+          type == 'order_created') {
+        print('[CashierStore] 🔄 Refreshing due to event: $type');
+        store.refreshAll();
+      }
+    });
+
+    store.refreshAll();
+    return store;
   }
 
   final Dio _dio;
+  RealtimeClient? _realtime;
 
   /// From login `user.restaurant_id` (same tenant as admin menu for this cashier).
   final String? cashierRestaurantId;
@@ -580,15 +612,17 @@ class RestaurantStore extends ChangeNotifier {
   }
 
   Future<bool> removeTable(String tableId) async {
-    if (hasActiveOrder(tableId)) {
-      return false;
-    }
     try {
+      // Always clear the table first (cancel active orders, close sessions)
+      // to prevent a 409 Conflict from the server.
+      await _dio.patch<Map<String, dynamic>>(
+        '/api/cashier/tables/$tableId/clear',
+      );
       await _dio.delete('/api/cashier/tables/$tableId');
       await refreshAll();
       return true;
     } catch (e) {
-      lastError = e.toString();
+      lastError = _dioErrorMessage(e);
       notifyListeners();
       return false;
     }
@@ -623,7 +657,9 @@ class RestaurantStore extends ChangeNotifier {
 
   bool hasActiveOrder(String tableId) {
     final oid = _activeOrderForTable(tableId);
-    return oid != null && oid.isNotEmpty;
+    if (oid == null || oid.isEmpty) return false;
+    final lines = _linesForOrderId(oid);
+    return lines.isNotEmpty;
   }
 
   List<BillLine> _linesForOrderId(String? orderId) {
@@ -993,6 +1029,20 @@ class RestaurantStore extends ChangeNotifier {
       await _dio.post<Map<String, dynamic>>(
         '/api/cashier/orders',
         data: {'table_id': tableId},
+      );
+      await refreshAll();
+    } catch (e) {
+      lastError = e.toString();
+      notifyListeners();
+    }
+  }
+
+  /// Force a table back to "empty" by cancelling active orders
+  /// and closing sessions.
+  Future<void> clearTable(String tableId) async {
+    try {
+      await _dio.patch<Map<String, dynamic>>(
+        '/api/cashier/tables/$tableId/clear',
       );
       await refreshAll();
     } catch (e) {

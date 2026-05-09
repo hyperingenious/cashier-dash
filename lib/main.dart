@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -126,10 +127,37 @@ class CashierDashApp extends StatefulWidget {
 }
 
 class _CashierDashAppState extends State<CashierDashApp> {
+  static const _storage = FlutterSecureStorage();
   RestaurantStore? _store;
   String _cashierName = '';
+  bool _loading = true;
 
-  void _handleLogin(String token, String cashierName, String? restaurantId) {
+  @override
+  void initState() {
+    super.initState();
+    _tryRestoreSession();
+  }
+
+  Future<void> _tryRestoreSession() async {
+    try {
+      final token = await _storage.read(key: 'cashier_token');
+      final name = await _storage.read(key: 'cashier_name');
+      final rid = await _storage.read(key: 'cashier_restaurant_id');
+      if (token != null && token.isNotEmpty) {
+        _handleLogin(token, name ?? 'Cashier', rid, persist: false);
+      }
+    } catch (_) {
+      // If secure storage fails, just show login.
+    }
+    if (mounted) setState(() => _loading = false);
+  }
+
+  void _handleLogin(
+    String token,
+    String cashierName,
+    String? restaurantId, {
+    bool persist = true,
+  }) {
     setState(() {
       _store = RestaurantStore.connect(
         baseUrl: apiBaseUrl,
@@ -138,9 +166,18 @@ class _CashierDashAppState extends State<CashierDashApp> {
       );
       _cashierName = cashierName;
     });
+    if (persist) {
+      _storage.write(key: 'cashier_token', value: token);
+      _storage.write(key: 'cashier_name', value: cashierName);
+      _storage.write(
+          key: 'cashier_restaurant_id', value: restaurantId ?? '');
+    }
   }
 
   void _handleLogout() {
+    _storage.delete(key: 'cashier_token');
+    _storage.delete(key: 'cashier_name');
+    _storage.delete(key: 'cashier_restaurant_id');
     setState(() {
       _store = null;
       _cashierName = '';
@@ -149,17 +186,27 @@ class _CashierDashAppState extends State<CashierDashApp> {
 
   @override
   Widget build(BuildContext context) {
+    Widget home;
+    if (_loading) {
+      home = const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    } else if (_store != null) {
+      home = DashboardScreen(
+        cashierName: _cashierName,
+        store: _store!,
+        onLogout: _handleLogout,
+      );
+    } else {
+      home = LoginScreen(
+        onLogin: (token, name, rid) => _handleLogin(token, name, rid),
+      );
+    }
     return MaterialApp(
       title: 'Bawarchi Cashier',
       debugShowCheckedModeBanner: false,
       theme: DS.buildTheme(),
-      home: _store != null
-          ? DashboardScreen(
-              cashierName: _cashierName,
-              store: _store!,
-              onLogout: _handleLogout,
-            )
-          : LoginScreen(onLogin: _handleLogin),
+      home: home,
     );
   }
 }
@@ -212,27 +259,15 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen>
-    with SingleTickerProviderStateMixin {
+class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
-  late AnimationController _animController;
   bool _busy = false;
   String? _loginError;
 
   @override
-  void initState() {
-    super.initState();
-    _animController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 10),
-    )..repeat(reverse: true);
-  }
-
-  @override
   void dispose() {
-    _animController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
     super.dispose();
@@ -294,10 +329,10 @@ class _LoginScreenState extends State<LoginScreen>
               child: SizedBox(
                 width: 340,
                 child: Form(
-                  key: _formKey,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
+                    key: _formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                       Container(
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
@@ -706,8 +741,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Cannot delete a table with an active order.'),
+      SnackBar(
+        content: Text(
+          widget.store.lastError ?? 'Could not delete table.',
+        ),
       ),
     );
   }
@@ -778,6 +815,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             final table = _selectedTable;
             if (table != null) {
               widget.store.markTableOccupied(table.id).then((_) {
+                if (mounted) setState(() {});
+              });
+            }
+          },
+          onClearTable: () {
+            final table = _selectedTable;
+            if (table != null) {
+              widget.store.clearTable(table.id).then((_) {
                 if (mounted) setState(() {});
               });
             }
@@ -1273,6 +1318,7 @@ class RestaurantFloorTab extends StatefulWidget {
     required this.onQuickAddItem,
     required this.onSettle,
     required this.onMarkOccupied,
+    required this.onClearTable,
     required this.onDeleteTable,
     super.key,
   });
@@ -1289,6 +1335,7 @@ class RestaurantFloorTab extends StatefulWidget {
   /// Called with API payment method: `cash`, `upi`, or `card`.
   final ValueChanged<String> onSettle;
   final VoidCallback onMarkOccupied;
+  final VoidCallback onClearTable;
   final VoidCallback onDeleteTable;
 
   @override
@@ -1420,6 +1467,7 @@ class _RestaurantFloorTabState extends State<RestaurantFloorTab>
             onQuickAddItem: widget.onQuickAddItem,
             onSettle: widget.onSettle,
             onMarkOccupied: widget.onMarkOccupied,
+            onClearTable: widget.onClearTable,
             onDeleteTable: widget.onDeleteTable,
           ),
         ),
@@ -1956,6 +2004,7 @@ class TableWorkbench extends StatelessWidget {
     required this.onQuickAddItem,
     required this.onSettle,
     required this.onMarkOccupied,
+    required this.onClearTable,
     required this.onDeleteTable,
     super.key,
   });
@@ -1967,6 +2016,7 @@ class TableWorkbench extends StatelessWidget {
   /// `cash`, `upi`, or `card`.
   final ValueChanged<String> onSettle;
   final VoidCallback onMarkOccupied;
+  final VoidCallback onClearTable;
   final VoidCallback onDeleteTable;
 
   @override
@@ -2077,6 +2127,7 @@ class TableWorkbench extends StatelessWidget {
                       borderRadius: BorderRadius.circular(10)),
                   onSelected: (value) {
                     if (value == 'occupy') onMarkOccupied();
+                    if (value == 'clear') onClearTable();
                     if (value == 'delete') onDeleteTable();
                     if (value == 'cancel_order') {
                       _confirmCancelOrder(context, store, table);
@@ -2144,6 +2195,21 @@ class TableWorkbench extends StatelessWidget {
                       ),
                     ),
                     PopupMenuItem(
+                      value: 'clear',
+                      height: 36,
+                      child: Row(
+                        children: [
+                          const Icon(Icons.cleaning_services_outlined,
+                              color: PosColors.accent, size: 18),
+                          const SizedBox(width: 10),
+                          Text('Mark Empty',
+                              style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: PosColors.textMain)),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
                       value: 'delete',
                       height: 36,
                       child: Row(
@@ -2178,6 +2244,19 @@ class TableWorkbench extends StatelessWidget {
                         Text('No active orders',
                             style: GoogleFonts.inter(
                                 color: PosColors.textMuted, fontSize: 14)),
+                        const SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: onClearTable,
+                          icon: const Icon(Icons.cleaning_services_outlined,
+                              size: 16),
+                          label: const Text('Mark Table Empty'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: PosColors.accent,
+                            side: const BorderSide(color: PosColors.accent),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 8),
+                          ),
+                        ),
                       ],
                     ),
                   )
@@ -2354,6 +2433,23 @@ class TableWorkbench extends StatelessWidget {
                 const SizedBox(height: 16),
                 Row(
                   children: [
+                    Expanded(
+                      child: Tooltip(
+                        message: 'Clear table session and mark as available',
+                        child: OutlinedButton.icon(
+                          onPressed: onClearTable,
+                          icon: const Icon(Icons.cleaning_services_outlined,
+                              size: 14),
+                          label: const Text('Clear',
+                              style: TextStyle(fontSize: 11)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: PosColors.textMuted,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
                     Expanded(
                       child: OutlinedButton.icon(
                         onPressed: onAddOrder,
@@ -3079,6 +3175,222 @@ class MenuSection extends StatelessWidget {
   }
 }
 
+/// Edit dine-in order lines from the Billing tab: same add / qty / remove as the
+/// floor workbench, using [AddOrderDialog] (dropdown + quantity, no search UI).
+Future<void> showBillingOrderLinesSheet(
+  BuildContext context,
+  RestaurantStore store,
+  DiningTable table,
+) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (sheetCtx) {
+      final bottomInset = MediaQuery.viewInsetsOf(sheetCtx).bottom;
+      final maxH = MediaQuery.sizeOf(sheetCtx).height * 0.88;
+      return Padding(
+        padding: EdgeInsets.only(bottom: bottomInset),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: SizedBox(
+            height: maxH,
+            width: math.min(
+              520,
+              MediaQuery.sizeOf(sheetCtx).width - 24,
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(20)),
+                child: GlassContainer(
+                  borderRadius: 0,
+                  child: AnimatedBuilder(
+                    animation: store,
+                    builder: (context, _) {
+                      final lines = store.orderDetailsForTable(table.id);
+                      final totals = store.calculateBill(table.id);
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 8, 4, 4),
+                            child: Row(
+                              children: [
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    table.name,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: PosColors.textMain,
+                                    ),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close,
+                                      color: PosColors.textMuted),
+                                  onPressed: () => Navigator.pop(sheetCtx),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Divider(height: 1, color: PosColors.border),
+                          Expanded(
+                            child: lines.isEmpty
+                                ? Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(24),
+                                      child: Text(
+                                        'No lines yet — add from the menu below.',
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.inter(
+                                          color: PosColors.textMuted,
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : ListView.separated(
+                                    padding: const EdgeInsets.all(16),
+                                    itemCount: lines.length,
+                                    separatorBuilder: (_, __) =>
+                                        const SizedBox(height: 10),
+                                    itemBuilder: (context, index) {
+                                      final line = lines[index];
+                                      final oid = line.orderItemId;
+                                      final mid = line.menuItemId;
+                                      final canChQty =
+                                          oid != null && oid.isNotEmpty;
+                                      final canAddUnit = mid != null &&
+                                          mid.isNotEmpty &&
+                                          store.hasActiveOrder(table.id);
+                                      return Row(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.center,
+                                        children: [
+                                          IconAction(
+                                            icon: Icons.remove,
+                                            tooltip: 'Decrease quantity',
+                                            onTap: !canChQty
+                                                ? () {}
+                                                : () => store
+                                                    .setOrderItemQuantity(
+                                                      table.id,
+                                                      oid,
+                                                      line.quantity - 1,
+                                                    ),
+                                          ),
+                                          IconAction(
+                                            icon: Icons.add,
+                                            tooltip: 'Increase quantity',
+                                            onTap: !canAddUnit
+                                                ? () {}
+                                                : () => store.addItemToOrder(
+                                                      tableId: table.id,
+                                                      menuItemId: mid,
+                                                      quantity: 1,
+                                                    ),
+                                          ),
+                                          Expanded(
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 8),
+                                              child: Text(
+                                                '${line.quantity}× ${line.itemName}',
+                                                style: GoogleFonts.inter(
+                                                  color: PosColors.textMain,
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ),
+                                          Text(
+                                            line.lineTotalFormatted,
+                                            style: GoogleFonts.inter(
+                                              color: PosColors.textMain,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          IconAction(
+                                            icon: Icons.close,
+                                            tooltip: 'Remove line',
+                                            danger: true,
+                                            onTap: !canChQty
+                                                ? () {}
+                                                : () => store
+                                                    .removeOrderItemLine(
+                                                      table.id,
+                                                      oid,
+                                                    ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                          ),
+                          const Divider(height: 1, color: PosColors.border),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                            child: store.menuItems.isEmpty
+                                ? Text(
+                                    'No menu catalog yet — add items in the Menu tab.',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      color: PosColors.textMuted,
+                                    ),
+                                  )
+                                : OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final draft =
+                                          await showDialog<OrderDraft>(
+                                        context: sheetCtx,
+                                        builder: (_) => AddOrderDialog(
+                                          menuItems: store.menuItems.toList(),
+                                        ),
+                                      );
+                                      if (!sheetCtx.mounted || draft == null) {
+                                        return;
+                                      }
+                                      await store.addItemToOrder(
+                                        tableId: table.id,
+                                        menuItemId: draft.menuItemId,
+                                        quantity: draft.quantity,
+                                      );
+                                    },
+                                    icon: const Icon(Icons.add, size: 18),
+                                    label: const Text('Add from menu'),
+                                  ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+                            child: _SummaryRow(
+                              label: 'Total',
+                              value: totals.totalFormatted,
+                              isTotal: true,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
 class BillingSection extends StatelessWidget {
   const BillingSection({
     required this.store,
@@ -3211,7 +3523,23 @@ class BillingSection extends StatelessWidget {
                                   color: PosColors.primaryGlow,
                                 ),
                               ),
-                              const SizedBox(width: 16),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.playlist_add,
+                                  color: PosColors.textMain,
+                                  size: 22,
+                                ),
+                                tooltip: 'Add or change items',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                onPressed: () => showBillingOrderLinesSheet(
+                                  context,
+                                  store,
+                                  table,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
                               ElevatedButton(
                                 onPressed: () {
                                   showDialog(
