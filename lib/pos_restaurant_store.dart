@@ -141,6 +141,7 @@ class RestaurantStore extends ChangeNotifier {
   final List<TransactionRecord> _transactions = [];
   final List<OffPremOrderRow> _pickupQueue = [];
   final List<OffPremOrderRow> _deliveryQueue = [];
+  final List<OffPremOrderRow> _qrQueue = [];
   final Map<String, Map<String, dynamic>> _orderDetailById = {};
   final Map<String, String?> _activeOrderIdByTableId = {};
 
@@ -227,6 +228,9 @@ class RestaurantStore extends ChangeNotifier {
 
   UnmodifiableListView<OffPremOrderRow> get deliveryQueue =>
       UnmodifiableListView(_deliveryQueue);
+
+  UnmodifiableListView<OffPremOrderRow> get qrQueue =>
+      UnmodifiableListView(_qrQueue);
 
   Future<void> refreshAll() async {
     lastError = null;
@@ -756,7 +760,8 @@ class RestaurantStore extends ChangeNotifier {
   Future<void> refreshOffPremQueues() async {
     _pickupQueue.clear();
     _deliveryQueue.clear();
-    for (final ch in const ['pickup', 'delivery']) {
+    _qrQueue.clear();
+    for (final ch in const ['pickup', 'delivery', 'qr']) {
       try {
         final res = await _dio.get<List<dynamic>>(
           '/api/cashier/orders',
@@ -788,8 +793,10 @@ class RestaurantStore extends ChangeNotifier {
         }
         if (ch == 'pickup') {
           _pickupQueue.addAll(rows);
-        } else {
+        } else if (ch == 'delivery') {
           _deliveryQueue.addAll(rows);
+        } else {
+          _qrQueue.addAll(rows);
         }
       } catch (_) {
         // leave queue empty; lastError set elsewhere if needed
@@ -803,6 +810,7 @@ class RestaurantStore extends ChangeNotifier {
     final activeIds = <String>{
       ..._pickupQueue.map((e) => e.id),
       ..._deliveryQueue.map((e) => e.id),
+      ..._qrQueue.map((e) => e.id),
     };
     _billPrintedOrderIds.removeWhere((id) => !activeIds.contains(id));
   }

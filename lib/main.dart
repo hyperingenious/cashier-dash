@@ -1175,6 +1175,14 @@ class _FloorModeTabStrip extends StatelessWidget {
                       onTap: () => controller.animateTo(2),
                     ),
                   ),
+                  Expanded(
+                    child: _ModeTabChip(
+                      label: 'QR Orders',
+                      icon: Icons.qr_code_2_outlined,
+                      selected: controller.index == 3,
+                      onTap: () => controller.animateTo(3),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -1300,11 +1308,12 @@ class _RestaurantFloorTabState extends State<RestaurantFloorTab>
   late TabController _tabs;
   String? _pickOrderId;
   String? _delOrderId;
+  String? _qrOrderId;
 
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 3, vsync: this);
+    _tabs = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -1446,6 +1455,9 @@ class _RestaurantFloorTabState extends State<RestaurantFloorTab>
               setSel(id);
             },
             onCreateTicket: () async {
+              if (channel == 'qr') {
+                return;
+              }
               final id = await widget.store.createOffPremOrder(channel);
               if (id != null && mounted) {
                 setSel(id);
@@ -1458,7 +1470,12 @@ class _RestaurantFloorTabState extends State<RestaurantFloorTab>
           width: 340,
           child: OffPremOrderWorkbench(
             store: widget.store,
-            channelTitle: channel == 'pickup' ? 'Pick up' : 'Delivery',
+            channelTitle: switch (channel) {
+              'pickup' => 'Pick up',
+              'delivery' => 'Delivery',
+              'qr' => 'QR Order',
+              _ => channel,
+            },
             selectedOrderId: selectedId,
             onOrderUpdated: () {
               if (mounted) setState(() {});
@@ -1496,6 +1513,12 @@ class _RestaurantFloorTabState extends State<RestaurantFloorTab>
                 (id) => setState(() => _delOrderId = id),
                 () => setState(() => _delOrderId = null),
               ),
+              _channelBody(
+                'qr',
+                _qrOrderId,
+                (id) => setState(() => _qrOrderId = id),
+                () => setState(() => _qrOrderId = null),
+              ),
             ],
           ),
         ),
@@ -1522,7 +1545,19 @@ class _ChannelQueuePanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = channel == 'pickup' ? 'Pick up' : 'Delivery';
+    final label = switch (channel) {
+      'pickup' => 'Pick up',
+      'delivery' => 'Delivery',
+      'qr' => 'QR Orders',
+      _ => channel,
+    };
+    final queue = switch (channel) {
+      'pickup' => store.pickupQueue,
+      'delivery' => store.deliveryQueue,
+      'qr' => store.qrQueue,
+      _ => store.pickupQueue,
+    };
+    final canCreateTicket = channel != 'qr';
     return ColoredBox(
       color: DS.bg,
       child: Column(
@@ -1534,11 +1569,12 @@ class _ChannelQueuePanel extends StatelessWidget {
               children: [
                 Text('$label · QUEUE', style: DS.eyebrow()),
                 const Spacer(),
-                OutlinedButton.icon(
-                  onPressed: onCreateTicket,
-                  icon: const Icon(Icons.add, size: 16),
-                  label: Text('New $label'),
-                ),
+                if (canCreateTicket)
+                  OutlinedButton.icon(
+                    onPressed: onCreateTicket,
+                    icon: const Icon(Icons.add, size: 16),
+                    label: Text('New $label'),
+                  ),
               ],
             ),
           ),
@@ -1551,13 +1587,13 @@ class _ChannelQueuePanel extends StatelessWidget {
             child: AnimatedBuilder(
               animation: store,
               builder: (context, _) {
-                final q = channel == 'pickup'
-                    ? store.pickupQueue
-                    : store.deliveryQueue;
+                final q = queue;
                 if (q.isEmpty) {
                   return Center(
                     child: Text(
-                      'No active $label orders.\nTap “New $label” to open a ticket.',
+                      canCreateTicket
+                          ? 'No active $label orders.\nTap “New $label” to open a ticket.'
+                          : 'No active QR orders yet.\nNew eater checkouts will appear here.',
                       textAlign: TextAlign.center,
                       style: DS.body(color: DS.textMuted),
                     ),
